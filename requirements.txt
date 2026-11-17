@@ -1,0 +1,18 @@
+# Core
+PySide6>=6.6
+SQLAlchemy>=2.0
+httpx>=0.27
+numpy>=1.26
+psutil>=5.9
+# Recording (live streams). Simulation mode does not need it.
+streamlink>=6.7
+# AI (local, optional but recommended)
+faster-whisper>=1.0
+# PyAV 19 removed av.open(metadata_errors=...), which faster-whisper 1.2.x still passes
+av>=11,<19
+opencv-python-headless>=4.9,<5
+# Optional: better voice detection / face detection
+# silero-vad
+# mediapipe
+# Optional: OS credential vault (falls back to Windows DPAPI)
+keyring>=24

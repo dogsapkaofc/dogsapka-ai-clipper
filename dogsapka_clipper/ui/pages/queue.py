@@ -1,0 +1,114 @@
+from __future__ import annotations
+
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QHBoxLayout, QProgressBar, QPushButton, QVBoxLayout, QWidget
+from sqlalchemy import select
+
+from dogsapka_clipper.core.i18n import tr
+from dogsapka_clipper.db.models import ProcessingJob
+from dogsapka_clipper.ui import theme
+from dogsapka_clipper.ui.icons import icon
+from dogsapka_clipper.ui.pages.base import Page
+from dogsapka_clipper.ui.widgets.common import Card, Pill, clear_layout, label
+
+COL = {"queued": theme.MUTED, "running": theme.CYAN, "paused": theme.AMBER, "done": theme.GREEN,
+       "failed": theme.RED, "cancelled": theme.MUTED}
+
+
+class JobRow(Card):
+    def __init__(self, page, j: ProcessingJob) -> None:
+        super().__init__(padding=12, shadow=False)
+        h = QHBoxLayout()
+        self.lay.addLayout(h)
+        v = QVBoxLayout()
+        name = {"process": "Automatic edit & export", "render": "Render (editor)", "transcribe": "AI transcription"}.get(j.kind, j.kind)
+        clip = j.clip.title or j.clip.reason if j.clip else ""
+        v.addWidget(label(f"#{j.id} · {name}", "H2"))
+        v.addWidget(label((clip or "")[:90], "Muted"))
+        h.addLayout(v, 2)
+        mid = QVBoxLayout()
+        self.bar = QProgressBar()
+        self.bar.setValue(int(j.progress * 100))
+        self.bar.setTextVisible(False)
+        mid.addWidget(self.bar)
+        self.stage = label(j.error[:160] if j.status == "failed" else j.stage, "Muted")
+        self.stage.setWordWrap(True)
+        mid.addWidget(self.stage)
+        h.addLayout(mid, 3)
+        h.addWidget(Pill(j.status, COL.get(j.status, theme.MUTED)))
+        q = page.backend.jobs
+        btns = []
+        if j.status in ("running", "queued"):
+            btns.append(("pause", tr("q.pause"), lambda: q.pause(j.id)))
+        if j.status == "paused":
+            btns.append(("play", tr("q.resume"), lambda: q.resume(j.id)))
+        if j.status in ("running", "queued", "paused"):
+            btns.append(("x", tr("q.cancel"), lambda: q.cancel(j.id)))
+        if j.status in ("failed", "cancelled"):
+            btns.append(("refresh", tr("q.retry"), lambda: q.retry(j.id)))
+        for ic, tip, fn in btns:
+            b = QPushButton()
+            b.setIcon(icon(ic))
+            b.setToolTip(tip)
+            b.clicked.connect(lambda _=False, f=fn: (f(), page.refresh()))
+            h.addWidget(b)
+
+
+class QueuePage(Page):
+    def __init__(self, win) -> None:
+        super().__init__(win, tr("nav.queue"), "Background jobs — the interface never waits for them")
+        self.pause_all = QPushButton()
+        self.pause_all.clicked.connect(self._toggle_all)
+        self.actions.addWidget(self.pause_all)
+        clr = QPushButton("Clear finished")
+        clr.clicked.connect(self.clear_finished)
+        self.actions.addWidget(clr)
+        holder = QWidget()
+        self.list = QVBoxLayout(holder)
+        self.list.setSpacing(10)
+        self.body.addWidget(holder)
+        self.body.addStretch()
+        self.rows: dict[int, JobRow] = {}
+        self._t = QTimer(self)
+        self._t.setSingleShot(True)
+        self._t.timeout.connect(self.refresh)
+        win.bridge.event.connect(self.on_event)
+
+    def _toggle_all(self):
+        self.backend.jobs.pause_all(not self.backend.jobs.globally_paused)
+        self.refresh()
+
+    def on_show(self):
+        self.refresh()
+
+    def on_event(self, ev) -> None:
+        if not self.isVisible() or not ev.kind.startswith("job."):
+            return
+        if ev.kind == "job.progress" and ev.data.get("job_id") in self.rows:
+            r = self.rows[ev.data["job_id"]]
+            r.bar.setValue(int(ev.data["progress"] * 100))
+            if ev.data.get("stage"):
+                r.stage.setText(ev.data["stage"])
+        else:
+            self._t.start(200)
+
+    def refresh(self) -> None:
+        paused = self.backend.jobs.globally_paused
+        self.pause_all.setText("  Resume all" if paused else "  Pause all")
+        self.pause_all.setIcon(icon("play" if paused else "pause"))
+        clear_layout(self.list)
+        self.rows.clear()
+        with self.backend.db.session() as s:
+            jobs = s.scalars(select(ProcessingJob).order_by(ProcessingJob.id.desc()).limit(100)).all()
+            for j in jobs:
+                row = JobRow(self, j)
+                self.rows[j.id] = row
+                self.list.addWidget(row)
+        if not jobs:
+            self.list.addWidget(label(tr("q.empty"), "Muted"))
+
+    def clear_finished(self) -> None:
+        with self.backend.db.session() as s:
+            for j in s.scalars(select(ProcessingJob).where(ProcessingJob.status.in_(("done", "cancelled")))):
+                s.delete(j)
+        self.refresh()

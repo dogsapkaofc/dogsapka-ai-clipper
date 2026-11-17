@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+build/
+dist/
+*.egg-info/
+.venv/
+DOGSAPKA_AI_CLIPPER_DATA/
+*.zip
+*.bundle
+
+# local tooling
+.claude/
+*.log
