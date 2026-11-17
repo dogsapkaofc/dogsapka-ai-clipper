@@ -44,5 +44,13 @@ $iscc = (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source
 if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
 $version = (.\.venv\Scripts\python.exe -c "import dogsapka_clipper; print(dogsapka_clipper.__version__)").Trim()
 Write-Host "Version $version"
-& $iscc "/DAppVersion=$version" packaging\installer.iss
+# antivirus scanners sometimes lock the new Setup.exe for a moment ("EndUpdateResource failed"): retry
+$ok = $false
+foreach ($attempt in 1..3) {
+    & $iscc "/DAppVersion=$version" packaging\installer.iss
+    if ($LASTEXITCODE -eq 0) { $ok = $true; break }
+    Write-Host "Installer compile failed (attempt $attempt) - retrying in 10 s"
+    Start-Sleep -Seconds 10
+}
+if (-not $ok) { throw "Inno Setup failed - see the messages above" }
 Write-Host "Done: dist\installer\"
