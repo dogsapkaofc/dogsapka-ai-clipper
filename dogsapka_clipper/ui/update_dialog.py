@@ -48,8 +48,7 @@ class UpdateDialog(QDialog):
         later = QPushButton(tr("upd.later"))
         later.clicked.connect(self.reject)
         row.addWidget(later)
-        self.go = QPushButton("  " + (tr("upd.install") if updater.can_self_install() and info.installable
-                                      else tr("upd.open_page")))
+        self.go = QPushButton("  " + (tr("upd.install") if updater.can_self_install(info) else tr("upd.open_page")))
         self.go.setObjectName("Primary")
         self.go.clicked.connect(self.install)
         row.addWidget(self.go)
@@ -64,7 +63,8 @@ class UpdateDialog(QDialog):
         self.reject()
 
     def install(self) -> None:
-        if not (updater.can_self_install() and self.info.installable):
+        if not updater.can_self_install(self.info):
+            # only when this computer has no installer in the release (e.g. an Intel Mac)
             QDesktopServices.openUrl(QUrl(self.info.page_url))
             self.accept()
             return
@@ -87,6 +87,15 @@ class UpdateDialog(QDialog):
             self.accept()
             self.win.quit_app(force=True)      # release files so the installer can replace them
 
+        if updater.source_checkout():
+            # running from the source code: pull the new version from GitHub and restart
+            def pulled(_):
+                self.status.setText(tr("upd.installing"))
+                self.accept()
+                self.win.restart_app(force=True)
+            run_async(lambda: updater.update_source_checkout(lambda f: self._prog.value.emit(int(f * 100))),
+                      pulled, self._failed)
+            return
         run_async(lambda: updater.download(self.info, lambda f: self._prog.value.emit(int(f * 100))),
                   done, self._failed)
 

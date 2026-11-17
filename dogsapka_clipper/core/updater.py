@@ -150,9 +150,44 @@ def download(info: UpdateInfo, progress: Callable[[float], None] | None = None,
     return dest
 
 
-def can_self_install() -> bool:
-    """Only the packaged app updates itself; a source checkout is updated with git."""
-    return bool(getattr(sys, "frozen", False)) and sys.platform in ("win32", "darwin")
+def source_checkout() -> Path | None:
+    """Repository folder when running from a git clone (not the packaged app)."""
+    if getattr(sys, "frozen", False):
+        return None
+    root = Path(__file__).resolve().parents[2]
+    return root if (root / ".git").exists() else None
+
+
+def can_self_install(info: "UpdateInfo | None" = None) -> bool:
+    """True when the update can be applied without the download page: the packaged app (with an installer
+    for this platform) or a git checkout (updated with git pull)."""
+    if source_checkout():
+        return True
+    packaged = bool(getattr(sys, "frozen", False)) and sys.platform in ("win32", "darwin")
+    return packaged and (info is None or info.installable)
+
+
+def update_source_checkout(progress: Callable[[float], None] | None = None) -> str:
+    """git pull + install new requirements in a source checkout. Returns "restart"."""
+    root = source_checkout()
+    if root is None:
+        raise UpdateError("Not a git checkout.")
+    kw = {"cwd": str(root), "capture_output": True, "text": True, "timeout": 600}
+    if sys.platform == "win32":
+        kw["creationflags"] = 0x08000000
+    if progress:
+        progress(0.1)
+    r = subprocess.run(["git", "pull", "--ff-only"], **kw)
+    if r.returncode != 0:
+        raise UpdateError("git pull failed (local changes or no network?):\n" + (r.stderr or r.stdout)[-600:])
+    if progress:
+        progress(0.6)
+    r = subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r", "requirements.txt"], **kw)
+    if r.returncode != 0:
+        raise UpdateError("Installing the new requirements failed:\n" + (r.stderr or r.stdout)[-600:])
+    if progress:
+        progress(1.0)
+    return "restart"
 
 
 def start_install(installer: Path) -> str:

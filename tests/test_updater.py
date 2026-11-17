@@ -71,5 +71,6 @@ def test_download_verifies_checksum(tmp_path):
     assert not (tmp_path / "Setup2.exe").exists()          # damaged file is removed
 
 
-def test_source_checkout_does_not_self_install():
-    assert U.can_self_install() == (bool(getattr(sys, "frozen", False)) and sys.platform in ("win32", "darwin"))
+def test_source_checkout_updates_with_git():
+    assert U.source_checkout() is not None          # tests run from the git clone
+    assert U.can_self_install(U.UpdateInfo("9.9.9", "", ""))   # even without installer: git pull
