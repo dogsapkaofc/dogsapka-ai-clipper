@@ -90,6 +90,8 @@ class InterfaceSettings:
     language: str = "en"             # en | hu
     notifications: bool = True
     first_run_complete: bool = False
+    auto_update_check: bool = True       # look for a new release at startup
+    skipped_update_version: str = ""     # "skip this version" in the update dialog
 
 
 @dataclass

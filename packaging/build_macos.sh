@@ -6,7 +6,6 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 APP_NAME="DOGSAPKA AI CLIPPER"
-VERSION="0.1.0"
 ARCH="$(uname -m)"                                   # arm64 (Apple silicon) or x86_64 (Intel)
 FF_ARCH=$([ "$ARCH" = "arm64" ] && echo arm64 || echo amd64)
 PY="${PYTHON:-python3}"
@@ -16,6 +15,8 @@ echo "==> Creating virtual environment"
 source .venv-mac/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements-dev.txt
+VERSION="$(python -c 'import dogsapka_clipper; print(dogsapka_clipper.__version__)')"
+echo "Version $VERSION"
 
 echo "==> Bundled FFmpeg (static build for macOS $ARCH, includes VideoToolbox + libass)"
 mkdir -p build/ffmpeg-mac

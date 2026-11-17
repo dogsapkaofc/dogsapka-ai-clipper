@@ -86,6 +86,10 @@ def main(argv: list[str] | None = None) -> int:
         run_async(backend.start_simulation, lambda sid: win.open_live(sid))
     if args.screenshot:
         _screenshot_mode(app, win, args.screenshot)
+    elif backend.settings.interface.auto_update_check:
+        from PySide6.QtCore import QTimer
+        from dogsapka_clipper.ui.update_dialog import check_for_updates
+        QTimer.singleShot(6000, lambda: check_for_updates(win))     # after startup has settled
     rc = app.exec()
     backend.shutdown()
     return rc

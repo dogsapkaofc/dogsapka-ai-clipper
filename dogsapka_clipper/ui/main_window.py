@@ -351,9 +351,9 @@ class MainWindow(QMainWindow):
         if self._quitting:
             QProcess.startDetached(sys.executable, args)
 
-    def quit_app(self) -> None:
+    def quit_app(self, force: bool = False) -> None:
         """Real exit (tray menu "Close"): stops live sessions safely, then quits the application."""
-        if self.backend.sessions:
+        if self.backend.sessions and not force:
             self.restore()
             r = QMessageBox.question(self, "DOGSAPKA AI CLIPPER",
                                      "Live sessions are running. Closing will stop recording safely and save "

@@ -277,6 +277,16 @@ class SettingsPage(Page):
         self.w["notify"] = QCheckBox("Desktop notifications")
         self.w["notify"].setChecked(s.interface.notifications)
         f.addRow("", self.w["notify"])
+        from dogsapka_clipper import __version__
+        urow = QHBoxLayout()
+        self.w["auto_update"] = QCheckBox(tr("upd.auto"))
+        self.w["auto_update"].setChecked(s.interface.auto_update_check)
+        urow.addWidget(self.w["auto_update"], 1)
+        upd = QPushButton("  " + tr("upd.check_now"))
+        upd.setIcon(icon("refresh"))
+        upd.clicked.connect(self.check_updates)
+        urow.addWidget(upd)
+        f.addRow(f"v{__version__}", urow)
         wiz = QPushButton("Run setup wizard again")
         wiz.clicked.connect(self.run_wizard)
         f.addRow("", wiz)
@@ -374,6 +384,7 @@ class SettingsPage(Page):
         a.subtitle_language, a.face_detection = w["sub_lang"].currentData(), w["face"].isChecked()
         a.metadata_language = w["meta_lang"].currentData()
         s.interface.language, s.interface.notifications = w["lang"].currentData(), w["notify"].isChecked()
+        s.interface.auto_update_check = w["auto_update"].isChecked()
         p = s.publishing
         p.youtube_enabled, p.youtube_client_id, p.youtube_privacy = (w["yt_on"].isChecked(), w["yt_id"].text().strip(),
                                                                      w["yt_priv"].currentText())
@@ -445,6 +456,10 @@ class SettingsPage(Page):
         if self.backend.auth:
             self.backend.auth.logout()
         self._update_status()
+
+    def check_updates(self) -> None:
+        from dogsapka_clipper.ui.update_dialog import check_for_updates
+        check_for_updates(self.win, manual=True)
 
     def change_data_folder(self) -> None:
         """Pick another drive/folder for clips, recordings and exports; existing data can be moved along."""

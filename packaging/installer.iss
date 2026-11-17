@@ -1,6 +1,8 @@
 ﻿; Inno Setup script - compile with ISCC.exe packaging\installer.iss (after build_windows.ps1)
 #define AppName "DOGSAPKA AI CLIPPER"
-#define AppVersion "0.1.0"
+#ifndef AppVersion
+  #define AppVersion "0.1.0"
+#endif
 #define AppExe "DOGSAPKA AI CLIPPER.exe"
 
 [Setup]
@@ -53,6 +55,8 @@ Name: "{autodesktop}\DOGSAPKA AI CLIPPER"; Filename: "{app}\{#AppExe}"; Tasks: d
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,DOGSAPKA AI CLIPPER}"; Flags: nowait postinstall skipifsilent
+; automatic update (silent install started by the app): start the new version again
+Filename: "{app}\{#AppExe}"; Flags: nowait runasoriginaluser; Check: WizardSilent
 
 ; User data (%LOCALAPPDATA%\DOGSAPKA_AI_CLIPPER: clips, exports, settings) is intentionally NOT removed on uninstall.
 

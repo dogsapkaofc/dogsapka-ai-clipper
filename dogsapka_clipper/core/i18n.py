@@ -161,6 +161,29 @@ STRINGS: dict[str, dict[str, str]] = {
     # settings
     "set.save": {"en": "Save settings", "hu": "Beállítások mentése"},
     "set.saved": {"en": "Settings saved.", "hu": "Beállítások elmentve."},
+    "upd.title": {"en": "New version available", "hu": "Új verzió érhető el"},
+    "upd.title_none": {"en": "Updates", "hu": "Frissítések"},
+    "upd.versions": {"en": "Version {new} is available - you have {cur}.",
+                     "hu": "Elérhető a(z) {new} verzió - neked most a(z) {cur} van."},
+    "upd.no_notes": {"en": "No release notes.", "hu": "Nincs leírás a változásokról."},
+    "upd.install": {"en": "Download and install", "hu": "Letöltés és telepítés"},
+    "upd.open_page": {"en": "Open download page", "hu": "Letöltési oldal megnyitása"},
+    "upd.later": {"en": "Later", "hu": "Később"},
+    "upd.skip": {"en": "Skip this version", "hu": "Ezt a verziót kihagyom"},
+    "upd.downloading": {"en": "Downloading…", "hu": "Letöltés…"},
+    "upd.installing": {"en": "Installing - the app restarts by itself in a moment.",
+                       "hu": "Telepítés - a program magától újraindul pár másodperc múlva."},
+    "upd.live_running": {"en": "Live recordings are running. Updating stops them safely (pending clips are saved). "
+                               "Update now?",
+                         "hu": "Élő felvétel fut. A frissítés biztonságosan leállítja (a függő klipek mentődnek). "
+                               "Frissítsek most?"},
+    "upd.manual_mac": {"en": "The disk image is open. Drag DOGSAPKA AI CLIPPER into Applications and replace the "
+                             "old version.",
+                       "hu": "Megnyílt a lemezkép. Húzd a DOGSAPKA AI CLIPPER-t az Alkalmazások (Applications) mappába, "
+                             "és cseréld le a régit."},
+    "upd.up_to_date": {"en": "You have the latest version ({cur}).", "hu": "A legfrissebb verzió van fent ({cur})."},
+    "upd.auto": {"en": "Check for updates at startup", "hu": "Frissítések keresése induláskor"},
+    "upd.check_now": {"en": "Check now", "hu": "Keresés most"},
     "set.data_folder": {"en": "Data folder", "hu": "Adatmappa"},
     "set.data_change": {"en": "Change…", "hu": "Módosítás…"},
     "set.data_pick": {"en": "Choose a drive or folder for clips, recordings and exports",

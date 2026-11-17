@@ -42,5 +42,7 @@ Copy-Item $sl.FullName "$tools\streamlink" -Recurse -Force
 Write-Host "==> Building installer"
 $iscc = (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source
 if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
-& $iscc packaging\installer.iss
+$version = (.\.venv\Scripts\python.exe -c "import dogsapka_clipper; print(dogsapka_clipper.__version__)").Trim()
+Write-Host "Version $version"
+& $iscc "/DAppVersion=$version" packaging\installer.iss
 Write-Host "Done: dist\installer\"

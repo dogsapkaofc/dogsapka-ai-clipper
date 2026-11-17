@@ -5,6 +5,9 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 root = Path(SPECPATH).parent
+import sys
+sys.path.insert(0, str(root))
+from dogsapka_clipper import __version__ as VERSION  # noqa: E402
 datas = collect_data_files("faster_whisper") + collect_data_files("cv2", includes=["data/*.xml"])
 datas += collect_data_files("streamlink") + collect_data_files("streamlink_cli")
 datas += [(str(root / "dogsapka_clipper" / "assets" / "face_detection_yunet_2023mar.onnx"), "dogsapka_clipper/assets")]
@@ -26,8 +29,8 @@ app = BUNDLE(
     info_plist={
         "CFBundleName": "DOGSAPKA AI CLIPPER",
         "CFBundleDisplayName": "DOGSAPKA AI CLIPPER",
-        "CFBundleShortVersionString": "0.1.0",
-        "CFBundleVersion": "0.1.0",
+        "CFBundleShortVersionString": VERSION,
+        "CFBundleVersion": VERSION,
         "NSHighResolutionCapable": True,
         "LSMinimumSystemVersion": "12.0",
         "NSRequiresAquaSystemAppearance": False,
