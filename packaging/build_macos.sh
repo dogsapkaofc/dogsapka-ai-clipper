@@ -30,7 +30,7 @@ done
 xattr -cr build/ffmpeg-mac || true
 build/ffmpeg-mac/ffmpeg -hide_banner -version | head -1
 build/ffmpeg-mac/ffmpeg -hide_banner -encoders 2>/dev/null | grep -q h264_videotoolbox && echo "VideoToolbox: yes"
-build/ffmpeg-mac/ffmpeg -hide_banner -filters 2>/dev/null | grep -qE "^ ... (ass|subtitles) " && echo "libass: yes"
+build/ffmpeg-mac/ffmpeg -hide_banner -filters 2>/dev/null | grep -qw subtitles && echo "libass: yes"
 
 echo "==> Running tests"
 PATH="$ROOT/build/ffmpeg-mac:$PATH" python -m pytest -q

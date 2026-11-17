@@ -97,7 +97,11 @@ class DashboardPage(Page):
     def _set_gpu(self, g) -> None:
         self._gpu = g
         if g is None:
-            self.cards["gpu"].set("CPU", "No NVIDIA GPU detected - CPU encoding")
+            import sys
+            if sys.platform == "darwin":
+                self.cards["gpu"].set("Apple", "VideoToolbox hardware encoding (if available)")
+            else:
+                self.cards["gpu"].set("CPU", "No NVIDIA GPU detected - CPU encoding")
         else:
             self.cards["gpu"].set(f"{g.utilization:.0f}%", f"{g.name} · {g.memory_used_mb:.0f}/{g.memory_total_mb:.0f} MB")
 
