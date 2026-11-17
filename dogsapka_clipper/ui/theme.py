@@ -28,7 +28,7 @@ GLASS_BORDER_HI = "rgba(167,139,250,0.45)"
 FIELD = "rgba(255,255,255,0.045)"
 
 QSS = f"""
-* {{ font-family: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", "Inter", "Noto Sans", sans-serif;
+* {{ font-family: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", "SF Pro Text", ".AppleSystemUIFont", "Helvetica Neue", "Inter", "Noto Sans", sans-serif;
      font-size: 10pt; color: {TEXT}; }}
 QMainWindow, QDialog {{ background: {BG}; }}
 QWidget#Root {{ background: {BG}; border: 1px solid {GLASS_BORDER}; border-radius: 16px; }}

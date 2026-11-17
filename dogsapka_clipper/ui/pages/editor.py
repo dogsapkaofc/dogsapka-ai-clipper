@@ -387,9 +387,9 @@ class EditorPage(Page):
         self._set_combo(self.preset, st.output.preset)
         self._set_combo(self.title_style, st.ai.title_style)
         self._set_combo(self.meta_lang, st.ai.metadata_language)
-        from dogsapka_clipper.processing.ffmpeg_utils import choose_encoder
+        from dogsapka_clipper.processing.ffmpeg_utils import ENCODER_LABELS, choose_encoder
         run_async(lambda: choose_encoder(st.output.encoder),
-                  lambda e: self.enc_lbl.setText("NVIDIA NVENC (GPU)" if e == "h264_nvenc" else "libx264 (CPU)"))
+                  lambda e: self.enc_lbl.setText(ENCODER_LABELS.get(e, e)))
         for sb in (self.t_start, self.t_end):
             sb.blockSignals(True)
             sb.setRange(0, self.duration)

@@ -42,13 +42,21 @@ def find_tool(name: str) -> str | None:
     found = shutil.which(name)
     if found:
         return found
-    if name == "streamlink" and not getattr(sys, "frozen", False):
-        # streamlink may be installed as a Python package without a launcher on PATH
+    if sys.platform == "darwin":
+        # apps started from Finder get a minimal PATH without Homebrew / MacPorts
+        for d in ("/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"):
+            if (Path(d) / name).exists():
+                return str(Path(d) / name)
+    if name == "streamlink":
         try:
             import streamlink  # noqa: F401
-            return f"{sys.executable} -m streamlink"
         except ImportError:
             return None
+        if getattr(sys, "frozen", False):
+            # packaged app without a separate streamlink executable: the app runs streamlink itself
+            return f"{sys.executable} --streamlink"
+        # streamlink installed as a Python package without a launcher on PATH
+        return f"{sys.executable} -m streamlink"
     return None
 
 
@@ -56,9 +64,10 @@ def tool_cmd(name: str) -> list[str]:
     path = find_tool(name)
     if not path:
         raise FFmpegError(f"{name} was not found. Install it or place it in the 'tools' folder next to the app.")
-    suffix = " -m streamlink"
-    if path.endswith(suffix):   # python executable path may itself contain spaces
-        return [path[: -len(suffix)], "-m", "streamlink"]
+    # the executable path may itself contain spaces, so split only the known suffixes off
+    for suffix, extra in ((" -m streamlink", ["-m", "streamlink"]), (" --streamlink", ["--streamlink"])):
+        if path.endswith(suffix):
+            return [path[: -len(suffix)], *extra]
     return [path]
 
 
@@ -171,16 +180,50 @@ def nvenc_available() -> bool:
         return False
 
 
+@functools.lru_cache(maxsize=None)
+def videotoolbox_available() -> bool:
+    """macOS hardware encoder (Apple silicon / Intel Quick Sync), verified by a real test encode."""
+    if sys.platform != "darwin" or not find_tool("ffmpeg"):
+        return False
+    try:
+        run(tool_cmd("ffmpeg") + ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                                  "color=black:s=256x256:d=0.1", "-c:v", "h264_videotoolbox", "-f", "null", "-"],
+            timeout=30)
+        return True
+    except FFmpegError:
+        return False
+
+
+def hardware_encoder() -> str | None:
+    if nvenc_available():
+        return "h264_nvenc"
+    if videotoolbox_available():
+        return "h264_videotoolbox"
+    return None
+
+
+ENCODER_LABELS = {"h264_nvenc": "NVIDIA NVENC (GPU)", "h264_videotoolbox": "Apple VideoToolbox (GPU)",
+                  "libx264": "libx264 (CPU)"}
+
+
 def choose_encoder(preference: str) -> str:
     if preference == "h264_nvenc":
         return "h264_nvenc" if nvenc_available() else "libx264"
+    if preference == "h264_videotoolbox":
+        return "h264_videotoolbox" if videotoolbox_available() else "libx264"
     if preference == "auto":
-        return "h264_nvenc" if nvenc_available() else "libx264"
+        return hardware_encoder() or "libx264"
     return "libx264"
 
 
 def video_encoder_args(encoder: str, crf: int, bitrate_k: int = 0, fps: int = 30) -> list[str]:
     gop = str(fps * 2)
+    if encoder == "h264_videotoolbox":
+        # VideoToolbox has no CRF: derive a bitrate from the quality setting (CRF 20 ~ 10 Mbit/s at 1080x1920)
+        kbps = bitrate_k or int(10000 * (0.88 ** (crf - 20)) * (1.4 if fps > 30 else 1.0))
+        return ["-c:v", "h264_videotoolbox", "-b:v", f"{kbps}k", "-maxrate", f"{int(kbps * 1.5)}k",
+                "-g", gop, "-allow_sw", "1", "-pix_fmt", "yuv420p", "-profile:v", "high",
+                "-movflags", "+faststart"]
     if encoder == "h264_nvenc":
         args = ["-c:v", "h264_nvenc", "-preset", "p5", "-tune", "hq", "-rc", "vbr", "-g", gop]
         args += ["-b:v", f"{bitrate_k}k", "-maxrate", f"{int(bitrate_k * 1.5)}k"] if bitrate_k else ["-cq", str(crf), "-b:v", "0"]

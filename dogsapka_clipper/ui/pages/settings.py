@@ -200,15 +200,20 @@ class SettingsPage(Page):
         self.w["abit"] = spin(64, 320, o.audio_bitrate_k, " kbps")
         f.addRow("Audio bitrate", self.w["abit"])
         self.w["encoder"] = QComboBox()
-        for k, t in (("auto", "Automatic (NVENC if usable)"), ("h264_nvenc", "NVIDIA NVENC"), ("libx264", "CPU (libx264)")):
+        import sys as _sys
+        encs = [("auto", "Automatic (GPU if usable)")]
+        encs += [("h264_videotoolbox", "Apple VideoToolbox")] if _sys.platform == "darwin" else [("h264_nvenc", "NVIDIA NVENC")]
+        encs += [("libx264", "CPU (libx264)")]
+        for k, t in encs:
             self.w["encoder"].addItem(t, k)
         self.w["encoder"].setCurrentIndex(self.w["encoder"].findData(o.encoder))
         f.addRow("GPU acceleration", self.w["encoder"])
         self.enc_status = label("Checking GPU…", "Muted")
         f.addRow("", self.enc_status)
-        from dogsapka_clipper.processing.ffmpeg_utils import nvenc_available
-        run_async(nvenc_available, lambda ok: self.enc_status.setText(
-            "✔ NVENC hardware encoding is available" if ok else "NVENC not available on this PC - CPU encoding is used"))
+        from dogsapka_clipper.processing.ffmpeg_utils import ENCODER_LABELS, hardware_encoder
+        run_async(hardware_encoder, lambda e: self.enc_status.setText(
+            f"✔ {ENCODER_LABELS[e]} hardware encoding is available" if e
+            else "No usable hardware encoder on this computer - CPU encoding is used"))
         od = QHBoxLayout()
         self.w["outdir"] = QLineEdit(o.output_dir)
         self.w["outdir"].setPlaceholderText(str(win.backend.paths.exports))
@@ -280,6 +285,14 @@ class SettingsPage(Page):
             self, "Cleanup", f"Removed {r['removed']} temporary files. Data folder uses {r['used_gb']:.1f} GB. "
                              "Clips and exports were not touched.")))
         f.addRow("", clean)
+        drow = QHBoxLayout()
+        self.data_dir_label = label(str(win.backend.paths.root), "Muted", wrap=True)
+        drow.addWidget(self.data_dir_label, 1)
+        chg = QPushButton("  " + tr("set.data_change"))
+        chg.setIcon(icon("folder"))
+        chg.clicked.connect(self.change_data_folder)
+        drow.addWidget(chg)
+        f.addRow(tr("set.data_folder"), drow)
         self.body.addWidget(c)
 
         c, f = _section(tr("set.publishing"), "Optional. Uses only the official YouTube Data API and TikTok Content "
@@ -432,6 +445,45 @@ class SettingsPage(Page):
         if self.backend.auth:
             self.backend.auth.logout()
         self._update_status()
+
+    def change_data_folder(self) -> None:
+        """Pick another drive/folder for clips, recordings and exports; existing data can be moved along."""
+        import shutil
+        from pathlib import Path
+        from dogsapka_clipper.core.paths import folder_size, normalize_data_folder, set_data_location
+        old = self.backend.paths.root
+        picked = QFileDialog.getExistingDirectory(self, tr("set.data_pick"), str(old.parent))
+        if not picked:
+            return
+        new = normalize_data_folder(Path(picked))
+        try:
+            if new.resolve() == old.resolve():
+                return
+            if old.resolve() in new.resolve().parents or new.resolve() in old.resolve().parents:
+                QMessageBox.warning(self, tr("error"), tr("set.data_nested"))
+                return
+        except OSError:
+            pass
+        size = folder_size(old)
+        r = QMessageBox.question(self, tr("set.data_folder"),
+                                 tr("set.data_move_q").format(new=new, size=size / 1e9),
+                                 QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
+        if r == QMessageBox.Cancel:
+            return
+        move = r == QMessageBox.Yes
+        try:
+            new.mkdir(parents=True, exist_ok=True)
+            free = shutil.disk_usage(new).free
+        except OSError as e:
+            QMessageBox.warning(self, tr("error"), f"{new}: {e}")
+            return
+        if move and free < size * 1.05:
+            QMessageBox.warning(self, tr("error"), tr("set.data_nospace").format(free=free / 1e9, size=size / 1e9))
+            return
+        set_data_location(new, move_from=old if move else None)
+        self.data_dir_label.setText(f"{old}  →  {new}  ({tr('set.data_after_restart')})")
+        if QMessageBox.question(self, tr("set.data_folder"), tr("set.data_restart_q")) == QMessageBox.Yes:
+            self.win.restart_app()
 
     def run_wizard(self) -> None:
         from dogsapka_clipper.ui.setup_wizard import SetupWizard

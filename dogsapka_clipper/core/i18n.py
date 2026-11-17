@@ -161,6 +161,24 @@ STRINGS: dict[str, dict[str, str]] = {
     # settings
     "set.save": {"en": "Save settings", "hu": "Beállítások mentése"},
     "set.saved": {"en": "Settings saved.", "hu": "Beállítások elmentve."},
+    "set.data_folder": {"en": "Data folder", "hu": "Adatmappa"},
+    "set.data_change": {"en": "Change…", "hu": "Módosítás…"},
+    "set.data_pick": {"en": "Choose a drive or folder for clips, recordings and exports",
+                      "hu": "Válassz meghajtót vagy mappát a klipeknek, felvételeknek és exportoknak"},
+    "set.data_nested": {"en": "The new folder cannot be inside the current data folder (or the other way round).",
+                        "hu": "Az új mappa nem lehet a mostani adatmappán belül (és fordítva sem)."},
+    "set.data_move_q": {"en": "New data folder:\n{new}\n\nMove the existing clips, recordings, exports and settings "
+                              "there ({size:.1f} GB)?\n\nYes = move everything\nNo = start empty in the new folder "
+                              "(the old data stays where it is)",
+                        "hu": "Új adatmappa:\n{new}\n\nÁtköltöztessem oda a meglévő klipeket, felvételeket, "
+                              "exportokat és beállításokat ({size:.1f} GB)?\n\nIgen = mindent átviszek\nNem = az új "
+                              "mappa üresen indul (a régi adatok a helyükön maradnak)"},
+    "set.data_nospace": {"en": "Not enough free space there: {free:.1f} GB free, {size:.1f} GB needed.",
+                         "hu": "Nincs ott elég szabad hely: {free:.1f} GB szabad, {size:.1f} GB kellene."},
+    "set.data_after_restart": {"en": "after restart", "hu": "újraindítás után"},
+    "set.data_restart_q": {"en": "The new folder is used after a restart (data is moved during startup). Restart now?",
+                           "hu": "Az új mappát újraindítás után használja a program (az áthelyezés indításkor "
+                                 "történik). Újraindítsam most?"},
     "set.twitch": {"en": "Twitch", "hu": "Twitch"},
     "set.recording": {"en": "Recording", "hu": "Felvétel"},
     "set.detection": {"en": "Highlight detection", "hu": "Kiemelés észlelés"},

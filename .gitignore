@@ -12,3 +12,6 @@ DOGSAPKA_AI_CLIPPER_DATA/
 # local tooling
 .claude/
 *.log
+dist-mac/
+.venv-mac/
+packaging/dogsapka.icns

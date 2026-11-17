@@ -1,0 +1,43 @@
+name: Build macOS app
+
+# Builds "DOGSAPKA AI CLIPPER.app" + .dmg on a GitHub-hosted Mac (Apple silicon), runs the test suite and a
+# smoke test of the packaged app, and attaches the .dmg to the workflow run (and to the release for v* tags).
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        env:
+          PYTHON: python3
+        run: bash packaging/build_macos.sh
+      - name: Upload disk image
+        uses: actions/upload-artifact@v4
+        with:
+          name: DOGSAPKA-macOS
+          path: dist-mac/installer/*.dmg
+          retention-days: 30
+      - name: Upload smoke-test screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-smoke-screenshots
+          path: build/smoke-shots/
+          if-no-files-found: ignore
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${GITHUB_REF_NAME}" dist-mac/installer/*.dmg --clobber

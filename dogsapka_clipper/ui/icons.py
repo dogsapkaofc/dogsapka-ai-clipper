@@ -64,7 +64,7 @@ def app_icon() -> QIcon:
     """Gradient play/scissors logo drawn at runtime (also exported as .ico for packaging)."""
     from PySide6.QtGui import QColor, QLinearGradient, QPainterPath, QPen
     ic = QIcon()
-    for s in (16, 24, 32, 48, 64, 128, 256):
+    for s in (16, 24, 32, 48, 64, 128, 256, 512, 1024):
         pm = QPixmap(s, s)
         pm.fill(Qt.transparent)
         p = QPainter(pm)

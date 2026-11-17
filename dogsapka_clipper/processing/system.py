@@ -55,7 +55,8 @@ def tool_version(name: str) -> str:
     if not path:
         return ""
     try:
-        cmd = path.split(" ") + (["--version"] if name == "streamlink" else ["-version"])
+        from dogsapka_clipper.processing.ffmpeg_utils import tool_cmd
+        cmd = tool_cmd(name) + (["--version"] if name == "streamlink" else ["-version"])
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=15, **popen_kwargs()).stdout
         return out.splitlines()[0][:80] if out else "installed"
     except Exception:
@@ -75,9 +76,14 @@ def run_system_checks(data_root, twitch_status: str = "not_configured") -> Syste
                                       "simulation mode works without it."))
     g = gpu_info()
     nv = nvenc_available() if find_tool("ffmpeg") else False
-    rep.checks.append(CheckResult("GPU acceleration", True,
-                                  (f"{g.name} - NVENC {'available' if nv else 'not usable'}" if g else
-                                   "No NVIDIA GPU detected - CPU encoding (libx264) will be used"), required=False))
+    from dogsapka_clipper.processing.ffmpeg_utils import videotoolbox_available
+    if g:
+        gpu_text = f"{g.name} - NVENC {'available' if nv else 'not usable'}"
+    elif videotoolbox_available():
+        gpu_text = "Apple VideoToolbox hardware encoding available"
+    else:
+        gpu_text = "No hardware encoder detected - CPU encoding (libx264) will be used"
+    rep.checks.append(CheckResult("GPU acceleration", True, gpu_text, required=False))
     free = shutil.disk_usage(data_root).free / 1e9
     rep.checks.append(CheckResult("Disk space", free >= 10, f"{free:.1f} GB free in {data_root}",
                                   fix="At least 10 GB free space is recommended for recordings and exports."))

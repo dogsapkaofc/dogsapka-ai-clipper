@@ -340,6 +340,17 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    def restart_app(self) -> None:
+        """Start a fresh instance, then quit this one (e.g. after changing the data folder)."""
+        import sys
+        from PySide6.QtCore import QProcess
+        import os
+        args = sys.argv[1:] if getattr(sys, "frozen", False) else ["-m", "dogsapka_clipper"] + sys.argv[1:]
+        args += ["--wait-pid", str(os.getpid())]     # new instance waits until this one has fully exited
+        self.quit_app()
+        if self._quitting:
+            QProcess.startDetached(sys.executable, args)
+
     def quit_app(self) -> None:
         """Real exit (tray menu "Close"): stops live sessions safely, then quits the application."""
         if self.backend.sessions:
