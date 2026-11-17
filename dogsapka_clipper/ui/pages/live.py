@@ -5,7 +5,8 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QComboBox, QGridLayout, QHBoxLayout, QLabel, QProgressBar, QVBoxLayout
+from PySide6.QtWidgets import (QButtonGroup, QComboBox, QGridLayout, QHBoxLayout, QLabel, QProgressBar,
+                               QPushButton, QVBoxLayout, QWidget)
 from sqlalchemy import select
 
 from dogsapka_clipper.core.i18n import tr
@@ -14,17 +15,96 @@ from dogsapka_clipper.processing.ffmpeg_utils import extract_frame
 from dogsapka_clipper.ui import theme
 from dogsapka_clipper.ui.bridge import run_async
 from dogsapka_clipper.ui.pages.base import Page
-from dogsapka_clipper.ui.widgets.common import ActivityFeed, Card, LiveGraph, Meter, Pill, TimelineBar, label
+from dogsapka_clipper.ui.widgets.common import (ActivityFeed, Card, FlowLayout, LiveGraph, Meter, Pill,
+                                                 TimelineBar, clear_layout, label)
+
+
+class LiveTile(Card):
+    """One streamer in the multi-stream grid: preview, score graph and key numbers. Click = details."""
+
+    def __init__(self, page, sid: int, name: str) -> None:
+        super().__init__(padding=12)
+        self.page, self.sid = page, sid
+        self.setFixedWidth(352)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip(tr("live.tile_tip"))
+        self.preview = QLabel(tr("live.waiting"))
+        self.preview.setAlignment(Qt.AlignCenter)
+        self.preview.setFixedSize(328, 184)
+        self.preview.setStyleSheet(f"background: {theme.BG2}; border-radius: 10px; color: {theme.MUTED};")
+        self.lay.addWidget(self.preview)
+        head = QHBoxLayout()
+        self.name = label(name, "H2")
+        head.addWidget(self.name, 1)
+        self.pill = Pill(tr("str.live"), theme.RED)
+        head.addWidget(self.pill)
+        self.lay.addLayout(head)
+        row = QHBoxLayout()
+        row.addWidget(label(tr("live.score"), "Muted"))
+        row.addStretch()
+        self.score = label("0", "H2")
+        row.addWidget(self.score)
+        self.lay.addLayout(row)
+        self.graph = LiveGraph(theme.PURPLE2, 180, y_max=100, height=64)
+        self.lay.addWidget(self.graph)
+        self.info = label("", "Muted", wrap=True)
+        self.lay.addWidget(self.info)
+        self.busy = False
+
+    def update_stats(self, st) -> None:
+        self.graph.set_values([v for _, v in st.scores[-180:]])
+        self.graph.threshold = st.threshold
+        self.score.setText(f"{st.score:.0f}")
+        hot = st.score >= st.threshold
+        self.score.setStyleSheet(f"color: {theme.AMBER if hot else theme.TEXT};")
+        self.pill.set("\u25cf " + tr("str.recording") if st.recording else tr("str.live"), theme.RED)
+        self.info.setText(f"Chat {st.chat_rate:.1f}/s  \u00b7  {tr('live.audio_short')} {st.audio_level:.2f}  \u00b7  "
+                          f"Buffer {st.buffer_s:.0f}/{st.buffer_target:.0f}s  \u00b7  \u2605 {st.highlights}")
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self.page.show_single(self.sid)
+        super().mouseReleaseEvent(e)
 
 
 class LivePage(Page):
     def __init__(self, win) -> None:
         super().__init__(win, tr("nav.live"), "Signals, scores and detections in real time")
+        # view switch: all live streamers side by side / one streamer in detail
+        self.btn_grid = QPushButton("  " + tr("live.view_all"))
+        self.btn_one = QPushButton("  " + tr("live.view_one"))
+        grp = QButtonGroup(self)
+        for btn in (self.btn_grid, self.btn_one):
+            btn.setCheckable(True)
+            grp.addButton(btn)
+            self.actions.addWidget(btn)
+        self.btn_grid.clicked.connect(lambda: self.set_mode("grid"))
+        self.btn_one.clicked.connect(lambda: self.set_mode("single"))
         self.combo = QComboBox()
         self.combo.setMinimumWidth(240)
         self.combo.currentIndexChanged.connect(self._changed)
         self.actions.addWidget(self.combo)
         self.sid: int | None = None
+        self.tiles: dict[int, LiveTile] = {}
+        self.mode = "grid"
+
+        # multi-stream grid
+        self.grid_view = QWidget()
+        gv = QVBoxLayout(self.grid_view)
+        gv.setContentsMargins(0, 0, 0, 0)
+        self.grid_empty = label(tr("live.none"), "Muted", wrap=True)
+        gv.addWidget(self.grid_empty)
+        holder = QWidget()
+        self.flow = FlowLayout(holder)
+        gv.addWidget(holder)
+        self.body.addWidget(self.grid_view)
+
+        # single-streamer detail view (built into its own container)
+        self.detail = QWidget()
+        real_body = self.body
+        self.body = QVBoxLayout(self.detail)
+        self.body.setContentsMargins(0, 0, 0, 0)
+        self.body.setSpacing(16)
 
         top = QHBoxLayout()
         top.setSpacing(16)
@@ -103,6 +183,9 @@ class LivePage(Page):
         self.feed = ActivityFeed(30)
         ev.lay.addWidget(self.feed)
         self.body.addWidget(ev)
+        self.body = real_body
+        self.body.addWidget(self.detail)
+        self.body.addStretch()
 
         win.bridge.event.connect(self.on_event)
         self._preview_busy = False
@@ -111,6 +194,64 @@ class LivePage(Page):
         self.timer.timeout.connect(self._refresh_preview)
         self.timer.start(5000)
         self.reload_streamers()
+        self.set_mode("grid")
+
+    # -- multi-stream grid -------------------------------------------------------------
+    def set_mode(self, mode: str) -> None:
+        self.mode = mode
+        self.btn_grid.setChecked(mode == "grid")
+        self.btn_one.setChecked(mode == "single")
+        self.combo.setVisible(mode == "single")
+        self.grid_view.setVisible(mode == "grid")
+        self.detail.setVisible(mode == "single")
+        if mode == "grid":
+            self.rebuild_tiles()
+        else:
+            self._refresh_preview(force=True)
+
+    def show_single(self, sid: int) -> None:
+        self.set_mode("single")
+        self.select_streamer(sid)
+
+    def _live_streamers(self) -> list[tuple[int, str]]:
+        with self.backend.db.session() as s:
+            rows = s.scalars(select(Streamer).order_by(Streamer.display_name)).all()
+            return [(r.id, r.display_name or r.login) for r in rows if r.id in self.backend.sessions or r.is_live]
+
+    def rebuild_tiles(self) -> None:
+        live = self._live_streamers()
+        if [sid for sid, _ in live] == list(self.tiles):
+            self.grid_empty.setVisible(not live)
+            return
+        clear_layout(self.flow)
+        self.tiles = {}
+        for sid, name in live:
+            t = LiveTile(self, sid, name)
+            self.tiles[sid] = t
+            self.flow.addWidget(t)
+        self.grid_empty.setVisible(not live)
+        self._refresh_tile_previews()
+
+    def _refresh_tile_previews(self) -> None:
+        for sid, tile in self.tiles.items():
+            sess = self.backend.sessions.get(sid)
+            if not sess or tile.busy or not sess.buffer.segments:
+                continue
+            seg = sess.buffer.segments[-1]
+            out = self.backend.paths.temp / f"preview_tile_{sid}.jpg"
+            tile.busy = True
+
+            def done(p, tile=tile):
+                tile.busy = False
+                pm = QPixmap(str(p))
+                if not pm.isNull():
+                    tile.preview.setPixmap(pm.scaled(tile.preview.width(), tile.preview.height(),
+                                                     Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+            def err(_e, tile=tile):
+                tile.busy = False
+            run_async(lambda seg=seg, out=out: extract_frame(seg.path, max(0.0, seg.duration - 0.5), out,
+                                                             width=480), done, err)
 
     def reload_streamers(self) -> None:
         with self.backend.db.session() as s:
@@ -183,10 +324,24 @@ class LivePage(Page):
             self.feed.add(f"{sc:.0f}/100 — {'; '.join(reasons[:2])}", "success", t)
 
     def on_event(self, ev) -> None:
-        if ev.kind in ("streamer.live", "streamer.offline", "streamer.added", "streamer.removed", "session.started"):
+        if ev.kind in ("streamer.live", "streamer.offline", "streamer.added", "streamer.removed", "session.started",
+                       "session.ended"):
             if self.isVisible():
                 self.reload_streamers()
                 self._load_static()
+                if self.mode == "grid":
+                    self.rebuild_tiles()
+        if ev.kind == "live.stats" and self.mode == "grid":
+            if not self.isVisible():
+                return
+            sid = ev.data.get("streamer_id")
+            tile = self.tiles.get(sid)
+            if tile is None and sid in self.backend.sessions:
+                self.rebuild_tiles()
+                tile = self.tiles.get(sid)
+            if tile is not None:
+                tile.update_stats(ev.data["stats"])
+            return
         if ev.data.get("streamer_id") != self.sid:
             return
         if ev.kind == "live.stats":
@@ -214,6 +369,9 @@ class LivePage(Page):
     def _refresh_preview(self, force: bool = False) -> None:
         """Preview = latest frame from our own recording buffer (no extra stream connection)."""
         if not self.isVisible() and not force:
+            return
+        if self.mode == "grid":
+            self._refresh_tile_previews()
             return
         sess = self.backend.sessions.get(self.sid) if self.sid is not None else None
         if not sess or self._preview_busy:

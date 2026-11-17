@@ -56,6 +56,7 @@ QFrame#Card[hover="true"] {{ border-color: {GLASS_BORDER_HI}; }}
 QPushButton {{ background: {GLASS}; border: 1px solid {GLASS_BORDER}; border-radius: 11px; padding: 8px 15px; }}
 QPushButton:hover {{ background: {GLASS_HOVER}; border-color: rgba(167,139,250,0.55); }}
 QPushButton:pressed {{ background: rgba(139,92,246,0.18); }}
+QPushButton:checked {{ background: rgba(139,92,246,0.26); border-color: rgba(167,139,250,0.75); font-weight: 600; }}
 QPushButton:disabled {{ color: #4E4E64; border-color: rgba(255,255,255,0.04); }}
 QPushButton#Primary {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #9D6BFF, stop:0.55 {PURPLE}, stop:1 #6D28D9);
                        border: 1px solid rgba(255,255,255,0.14); font-weight: 600; }}

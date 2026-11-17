@@ -167,6 +167,15 @@ STRINGS: dict[str, dict[str, str]] = {
     # settings
     "set.save": {"en": "Save settings", "hu": "Beállítások mentése"},
     "set.saved": {"en": "Settings saved.", "hu": "Beállítások elmentve."},
+    "live.view_all": {"en": "All live", "hu": "Összes élő"},
+    "live.view_one": {"en": "One streamer", "hu": "Egy streamer"},
+    "live.none": {"en": "No streamer is live right now. Monitored streamers appear here automatically when they "
+                        "go live - all of them side by side.",
+                  "hu": "Most egy streamer sincs élőben. A figyelt streamerek automatikusan megjelennek itt, amikor "
+                        "élőben vannak - mind egymás mellett."},
+    "live.tile_tip": {"en": "Click for the detailed view", "hu": "Kattints a részletes nézethez"},
+    "live.waiting": {"en": "Waiting for the first recorded seconds…", "hu": "Várakozás az első felvett másodpercekre…"},
+    "live.audio_short": {"en": "Audio", "hu": "Hang"},
     "q.open_tip": {"en": "Click to open the finished video", "hu": "Kattints a kész videó megnyitásához"},
     "q.open_video": {"en": "Play video", "hu": "Videó lejátszása"},
     "q.open_folder": {"en": "Show in folder", "hu": "Megnyitás mappában"},
