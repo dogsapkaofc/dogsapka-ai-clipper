@@ -49,6 +49,9 @@ def main(argv: list[str] | None = None) -> int:
     app.setStyle("Fusion")
     app.setStyleSheet(theme.QSS)
     app.setWindowIcon(app_icon())
+    from dogsapka_clipper.ui.widgets.common import WheelGuard
+    wheel_guard = WheelGuard()               # mouse wheel scrolls pages, never changes unfocused settings
+    app.installEventFilter(wheel_guard)
     if move_error:
         QMessageBox.warning(None, "DOGSAPKA AI CLIPPER", move_error)
 

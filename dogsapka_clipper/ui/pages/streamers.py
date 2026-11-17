@@ -118,6 +118,10 @@ class StreamerCard(Card):
 class StreamersPage(Page):
     def __init__(self, win) -> None:
         super().__init__(win, tr("nav.streamers"), "Authorized Twitch and YouTube channels monitored for highlights")
+        # one button for all streamers: "Start all" while any is paused, otherwise "Stop all"
+        self.all_btn = QPushButton()
+        self.all_btn.clicked.connect(self.toggle_all)
+        self.actions.addWidget(self.all_btn)
         add = QPushButton("  " + tr("str.add"))
         add.setObjectName("Primary")
         add.setIcon(icon("plus"))
@@ -141,7 +145,28 @@ class StreamersPage(Page):
     def on_show(self) -> None:
         self.refresh()
 
+    def _update_all_button(self) -> None:
+        on, total = self.backend.monitoring_state()
+        start = on < total or total == 0
+        self.all_btn.setText("  " + (tr("str.start_all") if start else tr("str.stop_all")) + f"  ({on}/{total})")
+        self.all_btn.setIcon(icon("play" if start else "pause", theme.CYAN if start else theme.RED))
+        self.all_btn.setObjectName("Accent" if start else "Danger")
+        self.all_btn.style().unpolish(self.all_btn)
+        self.all_btn.style().polish(self.all_btn)
+        self.all_btn.setEnabled(total > 0)
+        self.all_btn.setToolTip(tr("str.all_tip"))
+
+    def toggle_all(self) -> None:
+        on, total = self.backend.monitoring_state()
+        start = on < total
+        if not start and self.backend.sessions and QMessageBox.question(
+                self, tr("str.stop_all"), tr("str.stop_all_q")) != QMessageBox.Yes:
+            return
+        self.backend.set_monitoring_all(start)
+        self.refresh()
+
     def refresh(self) -> None:
+        self._update_all_button()
         clear_layout(self.flow)
         st = self.backend.twitch_status()
         msgs = {"not_configured": "⚠ Twitch is not configured. Open Settings → Twitch to enter your application's "

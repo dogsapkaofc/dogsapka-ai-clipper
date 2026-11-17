@@ -299,6 +299,29 @@ class Backend:
             self._poke_monitors()
         self.bus.emit("streamer.updated", "", streamer_id=sid)
 
+    def set_monitoring_all(self, enabled: bool) -> int:
+        """Start or stop monitoring every real streamer (the simulation entry is left alone).
+        Stopping also ends running recordings safely. Returns the number of streamers changed."""
+        with self.db.session() as s:
+            rows = s.scalars(select(Streamer).where(Streamer.login != "dogsapka_simulation",
+                                                    Streamer.monitoring_enabled.is_(not enabled))).all()
+            ids = [r.id for r in rows]
+            for r in rows:
+                r.monitoring_enabled = enabled
+        if not enabled:
+            for sid in ids:
+                self.stop_session(sid)
+        else:
+            self._poke_monitors()
+        self.bus.emit("streamer.updated", "", streamer_id=None)
+        return len(ids)
+
+    def monitoring_state(self) -> tuple[int, int]:
+        """(monitored, total) real streamers."""
+        with self.db.session() as s:
+            rows = s.scalars(select(Streamer).where(Streamer.login != "dogsapka_simulation")).all()
+            return sum(1 for r in rows if r.monitoring_enabled), len(rows)
+
     # -- sessions -------------------------------------------------------------------
     def has_session(self, sid: int) -> bool:
         return sid in self.sessions

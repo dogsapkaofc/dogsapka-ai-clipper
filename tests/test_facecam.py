@@ -114,3 +114,62 @@ def test_cam_flush_with_edge_ignores_static_line_inside_cam(face_cx, chair_x):
     L, T, bw, bh = box
     assert L == 0, box
     assert abs((L + bw) - 94) <= 3 and abs(T - 85) <= 3 and abs((T + bh) - 147) <= 3, box
+
+
+def _rect_scene(cam, face_xy, n=20, seed=0, w=960, h=540):
+    """Moving 'game' (textured blocks that pan) + a static facecam rectangle with a slightly moving person."""
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    big = np.kron(rng.uniform(40, 220, (h // 12 + 8, w // 12 + 8)), np.ones((12, 12)))
+    x, y, cw, ch = cam
+    frames = []
+    for i in range(n):
+        ox, oy = 3 * i + int(rng.integers(0, 5)), 2 * i
+        g = big[oy:oy + h, ox:ox + w].copy()
+        g[y:y + ch, x:x + cw] = 35.0                                # dark room behind the streamer
+        g[y + ch // 3:y + ch // 3 + 5, x + 10:x + cw // 2] = 120.0   # a shelf: short static line inside the cam
+        fx, fy = face_xy
+        g[fy - 20 + (i % 3):fy + 30, fx - 25:fx + 25] = 150 + 10 * np.sin(i)   # the person (moves a little)
+        frames.append(g)
+    return frames
+
+
+@pytest.mark.parametrize("cam,face", [((620, 210, 257, 165), (700, 330)),     # floating, face low in the cam
+                                      ((0, 0, 216, 139), (110, 90)),           # top-left corner, flush with edges
+                                      ((350, 260, 203, 130), (450, 330))],     # middle of the screen
+                         ids=["floating-low-face", "corner", "middle"])
+def test_cam_rectangle_found_exactly(cam, face):
+    """Regression (real stream screenshot): the facecam is a rectangle - its static frame lines are found
+    exactly, even when the face sits close to the cam's bottom edge."""
+    from dogsapka_clipper.processing.layout import find_cam_rectangle
+    frames = _rect_scene(cam, face)
+    fx, fy = face
+    box = find_cam_rectangle(frames, (fx - 25, fy - 30, 50, 60))
+    assert box is not None
+    x, y, w, h = cam
+    L, T, bw, bh = box
+    assert abs(L - x) <= 3 and abs(T - y) <= 3 and abs(L + bw - (x + w)) <= 3 and abs(T + bh - (y + h)) <= 3, box
+
+
+def test_no_rectangle_without_static_frame():
+    """A face on moving content without any static frame: no rectangle is invented."""
+    import numpy as np
+    from dogsapka_clipper.processing.layout import find_cam_rectangle
+    rng = np.random.default_rng(3)
+    big = np.kron(rng.uniform(40, 220, (60, 100)), np.ones((12, 12)))
+    frames = []
+    for i in range(20):                       # the game pans (like real gameplay) - no static frame anywhere
+        ox, oy = 3 * i + int(rng.integers(0, 5)), 2 * i
+        frames.append(big[oy:oy + 540, ox:ox + 960])
+    assert find_cam_rectangle(frames, (450, 250, 50, 60)) is None
+
+
+def test_static_face_preferred_over_moving_game_face():
+    """Two faces seen equally often: the one that stays put is the facecam."""
+    from dogsapka_clipper.processing import layout
+    moving = [[(100 + 15 * i, 300, 40, 40)] for i in range(10)]
+    static = [[(700, 80, 40, 40)] for _ in range(10)]
+    clusters = layout._cluster_faces([m + s for m, s in zip(moving, static)], radius=200)
+    import numpy as np
+    clusters.sort(key=lambda c: (-len(c), float(np.std([f[0] for f in c]) + np.std([f[1] for f in c]))))
+    assert clusters[0][0][0] == 700

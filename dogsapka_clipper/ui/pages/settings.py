@@ -28,6 +28,18 @@ def _section(title: str, desc: str = "") -> tuple[Card, QFormLayout]:
     return c, f
 
 
+def links(*items: tuple[str, str]) -> QLabel:
+    """Row of clickable links that open in the browser (where to create the keys)."""
+    html = "  ·  ".join(f'<a href="{url}" style="color:{theme.CYAN}; text-decoration:none;">↗ {text}</a>'
+                        for text, url in items)
+    lab = QLabel(html)
+    lab.setTextFormat(Qt.RichText)
+    lab.setOpenExternalLinks(True)
+    lab.setWordWrap(True)
+    lab.setTextInteractionFlags(Qt.TextBrowserInteraction)
+    return lab
+
+
 def spin(lo, hi, val, suffix="", step=1, dbl=False):
     s = QDoubleSpinBox() if dbl else QSpinBox()
     s.setRange(lo, hi)
@@ -76,6 +88,8 @@ class SettingsPage(Page):
         c, f = _section(tr("set.twitch"), "Register a free application at dev.twitch.tv/console (category: "
                                           "Application Integration, client type: Public) and paste its Client ID. "
                                           "Only official Twitch APIs are used.")
+        f.addRow("", links((tr("lnk.twitch_create"), "https://dev.twitch.tv/console/apps/create"),
+                           (tr("lnk.twitch_apps"), "https://dev.twitch.tv/console/apps")))
         self.w["client_id"] = QLineEdit(s.twitch.client_id)
         f.addRow("Client ID", self.w["client_id"])
         self.w["client_secret"] = QLineEdit()
@@ -102,6 +116,9 @@ class SettingsPage(Page):
 
         c, f = _section(tr("set.youtube_live"), tr("set.youtube_live_desc"))
         y = s.youtube_live
+        f.addRow("", links((tr("lnk.yt_enable"), "https://console.cloud.google.com/apis/library/youtube.googleapis.com"),
+                           (tr("lnk.yt_key"), "https://console.cloud.google.com/apis/credentials"),
+                           (tr("lnk.yt_quota"), "https://console.cloud.google.com/apis/api/youtube.googleapis.com/quotas")))
         self.w["yt_api_key"] = QLineEdit()
         self.w["yt_api_key"].setEchoMode(QLineEdit.Password)
         self.w["yt_api_key"].setPlaceholderText(tr("set.yt_key_set") if win.backend.youtube_api_key()
@@ -312,6 +329,9 @@ class SettingsPage(Page):
                                               "Posting API. Uploads need your confirmation unless you turn on "
                                               "automatic upload below.")
         p = s.publishing
+        f.addRow("YouTube", links((tr("lnk.g_clients"), "https://console.cloud.google.com/auth/clients"),
+                                  (tr("lnk.g_testers"), "https://console.cloud.google.com/auth/audience"),
+                                  (tr("lnk.yt_enable"), "https://console.cloud.google.com/apis/library/youtube.googleapis.com")))
         self.w["yt_on"] = QCheckBox("Enable YouTube upload")
         self.w["yt_on"].setChecked(p.youtube_enabled)
         f.addRow("", self.w["yt_on"])
@@ -326,6 +346,8 @@ class SettingsPage(Page):
         self.w["yt_priv"].addItems(["private", "unlisted", "public"])
         self.w["yt_priv"].setCurrentText(p.youtube_privacy)
         f.addRow("Default privacy", self.w["yt_priv"])
+        f.addRow("TikTok", links((tr("lnk.tt_apps"), "https://developers.tiktok.com/apps/"),
+                                 (tr("lnk.tt_docs"), "https://developers.tiktok.com/doc/content-posting-api-get-started")))
         self.w["tt_on"] = QCheckBox("Enable TikTok upload (requires an approved TikTok developer app)")
         self.w["tt_on"].setChecked(p.tiktok_enabled)
         f.addRow("", self.w["tt_on"])
@@ -414,7 +436,8 @@ class SettingsPage(Page):
         self._update_status()
         if quiet:
             return
-        QMessageBox.information(self, tr("nav.settings"), tr("set.saved") + ("\n" + tr("set.restart") if lang_changed else ""))
+        # short confirmation in the top-right corner instead of a pop-up dialog
+        self.win.toast(tr("set.saved") + ("  " + tr("set.restart") if lang_changed else ""))
 
     def connect_twitch(self) -> None:
         self.save()

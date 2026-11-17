@@ -189,6 +189,95 @@ def _cluster_faces(faces_per_frame: list[list[tuple]], radius: float) -> list[li
     return sorted(clusters, key=len, reverse=True)
 
 
+def _line_candidates(profile: np.ndarray, lo: int, hi: int, keep: int = 4, min_cont: float = 0.5) -> list[int]:
+    """Indices in [lo, hi] that are local maxima of a continuity profile, strongest first."""
+    lo, hi = max(0, lo), min(len(profile) - 1, hi)
+    if hi < lo:
+        return []
+    seg = profile[lo:hi + 1]
+    order = sorted((i for i in range(len(seg)) if seg[i] >= min_cont), key=lambda i: -seg[i])
+    picked: list[int] = []
+    for i in order:                       # non-maximum suppression: one candidate per line (lines are 2-4 px)
+        if all(abs(i - j) > 4 for j in picked):
+            picked.append(i)
+        if len(picked) >= keep:
+            break
+    return [lo + i for i in picked]
+
+
+EDGE_SCORE = 0.7    # a side flush with the frame edge: acceptable, but any real border line beats it
+
+
+def find_cam_rectangle(grays: list[np.ndarray], face: tuple[float, float, float, float]
+                       ) -> tuple[int, int, int, int] | None:
+    """Find the facecam as the rectangle of *static straight lines* around the face (x, y, w, h).
+
+    Facecams are overlays with a rectangular frame. Taking the median gradient over many frames removes the
+    moving game; the cam's frame stays as long continuous lines. All combinations of candidate top/bottom/
+    left/right lines are scored by how continuous each side is over its full length; a side may also sit on
+    the frame edge (fixed lower score). Returns None when no convincing rectangle exists.
+    """
+    if len(grays) < 3:
+        return None
+    stack = np.stack(grays).astype(np.float32)
+    h, w = stack.shape[1:]
+    gx = np.median(np.abs(np.diff(stack, axis=2)), axis=0)        # (h, w-1): vertical lines
+    gy = np.median(np.abs(np.diff(stack, axis=1)), axis=0)        # (h-1, w): horizontal lines
+    gx = np.maximum(gx, np.maximum(np.roll(gx, 1, 1), np.roll(gx, -1, 1)))   # tolerate 1 px wobble
+    gy = np.maximum(gy, np.maximum(np.roll(gy, 1, 0), np.roll(gy, -1, 0)))
+    thr_x = max(8.0, 4.0 * float(np.median(gx)))
+    thr_y = max(8.0, 4.0 * float(np.median(gy)))
+    sx, sy = gx > thr_x, gy > thr_y
+    fx, fy, fw, fh = face
+    cx, cy = fx + fw / 2, fy + fh / 2
+    # candidate lines, measured over a span that is surely inside the cam (around the face)
+    x0, x1 = int(max(0, cx - fw)), int(min(w - 1, cx + fw))
+    y0, y1 = int(max(0, cy - fh)), int(min(h - 1, cy + fh))
+    row = sy[:, x0:x1].mean(axis=1)
+    col = sx[y0:y1, :].mean(axis=0)
+    # borders lie outside the face box; streamers often sit low in the cam, so start right at the face edge
+    tops = _line_candidates(row, int(cy - 6 * fh), int(cy - 0.5 * fh)) + [-1]            # -1 = frame top
+    bottoms = _line_candidates(row, int(cy + 0.45 * fh), int(cy + 7 * fh)) + [h - 1]     # h-1 = frame bottom
+    lefts = _line_candidates(col, int(cx - 7 * fw), int(cx - 0.5 * fw)) + [-1]
+    rights = _line_candidates(col, int(cx + 0.5 * fw), int(cx + 7 * fw)) + [w - 1]
+
+    def side_h(i: int, L: int, R: int) -> float:       # horizontal border after row i, spanning columns L..R
+        return EDGE_SCORE if i in (-1, h - 1) else float(sy[i, L:R + 1].mean())
+
+    def side_v(j: int, T: int, B: int) -> float:
+        return EDGE_SCORE if j in (-1, w - 1) else float(sx[T:B + 1, j].mean())
+
+    best, best_key = None, (-1.0, 0)
+    for t in tops:
+        for b in bottoms:
+            T, B = t + 1, b                     # rectangle rows T..B
+            if B - T < 1.25 * fh or B - T > 0.9 * h:
+                continue
+            for le in lefts:
+                for r in rights:
+                    L, R = le + 1, r
+                    bw, bh = R - L + 1, B - T + 1
+                    if bw < 1.4 * fw or bw > 0.85 * w or not 0.6 <= bw / bh <= 2.6:
+                        continue
+                    sides = (side_h(t, L, R), side_h(b, L, R), side_v(le, T, B), side_v(r, T, B))
+                    if min(sides) < 0.55:
+                        continue
+                    key = (round(sum(sides) / 4, 2), bw * bh)
+                    if key > best_key:
+                        best, best_key = (L, T, bw, bh), key
+    if best is None or best_key[0] < 0.72:
+        return None
+    # a side within ~1 % of the frame edge is flush with it (thin static lines near the edge are not borders)
+    L, T, bw, bh = best
+    R, B = L + bw, T + bh
+    tol_x, tol_y = max(3, int(w * 0.012)), max(3, int(h * 0.012))
+    L = 0 if L <= tol_x else L
+    T = 0 if T <= tol_y else T
+    R = w if w - R <= tol_x else R
+    B = h if h - B <= tol_y else B
+    return L, T, R - L, B - T
+
+
 def _pick_border(cont: np.ndarray, strength: np.ndarray, act: np.ndarray, lo: int, hi: int, toward_low: bool,
                  edge: int, strip: int, min_cont: float = 0.75, ref_act: float = 0.0,
                  max_gap: int = 0) -> int | None:
@@ -297,6 +386,12 @@ def analyze_layout(path: Path, detector: FaceDetector | None = None, n_frames: i
     analysis.crop_track = _smooth_track(track)
 
     clusters = _cluster_faces(faces_per_frame, radius=sw * 0.06)
+    # the facecam face is the one that stays put: among equally frequent faces prefer the most static one
+    def _spread(c):
+        xs = [f[0] + f[2] / 2 for f in c]
+        ys = [f[1] + f[3] / 2 for f in c]
+        return float(np.std(xs) + np.std(ys))
+    clusters.sort(key=lambda c: (-len(c), _spread(c)))
     if clusters:
         best = clusters[0]
         frac_frames = len(best) / len(frames)
@@ -309,7 +404,8 @@ def analyze_layout(path: Path, detector: FaceDetector | None = None, n_frames: i
             analysis.face_center = (cx / sw, cy / sh)
             return analysis
         if frac_frames >= 0.3:
-            box = refine_facecam(grays, (cx - fw / 2, cy - fh / 2, fw, fh))
+            face_box = (cx - fw / 2, cy - fh / 2, fw, fh)
+            box = find_cam_rectangle(grays, face_box) or refine_facecam(grays, face_box)
             if box is not None:
                 r = Rect(int(box[0] * scale), int(box[1] * scale), int(box[2] * scale), int(box[3] * scale))
             else:

@@ -191,6 +191,8 @@ class MainWindow(QMainWindow):
             self.tray.setContextMenu(menu)
             self.tray.activated.connect(self._tray_activated)
             self.tray.show()
+        from dogsapka_clipper.ui.widgets.common import Toast
+        self._toast = Toast(self.centralWidget())
         self.bridge.event.connect(self._on_event)
         self.navigate("dashboard")
         self._timer = QTimer(self)
@@ -287,6 +289,10 @@ class MainWindow(QMainWindow):
             self.tray.showMessage("DOGSAPKA AI CLIPPER", ev.message, level, 5000)
 
     # -- tray / taskbar ------------------------------------------------------------
+    def toast(self, text: str, color: str | None = None) -> None:
+        """Short confirmation in the top-right corner (instead of a pop-up dialog)."""
+        self._toast.show_message(text, color or theme.GREEN)
+
     def restore(self) -> None:
         if self.isMinimized():
             self.showNormal()

@@ -466,3 +466,65 @@ class ActivityFeed(QWidget):
             it = self.lay.takeAt(self.lay.count() - 2)
             if it.widget():
                 it.widget().deleteLater()
+
+
+class WheelGuard(QWidget):
+    """App-wide fix: the mouse wheel scrolls the page instead of changing spin boxes, combo boxes and sliders
+    the cursor happens to pass over. Those only react to the wheel after they were clicked (have focus)."""
+
+    def eventFilter(self, obj, ev):
+        from PySide6.QtCore import QEvent
+        from PySide6.QtWidgets import QAbstractScrollArea, QAbstractSpinBox, QApplication, QComboBox, QSlider
+        if ev.type() == QEvent.Wheel and isinstance(obj, (QAbstractSpinBox, QComboBox, QSlider)) \
+                and not obj.hasFocus():
+            w = obj.parentWidget()
+            while w is not None and not isinstance(w, QAbstractScrollArea):
+                w = w.parentWidget()
+            if w is not None:
+                QApplication.sendEvent(w.viewport(), ev)     # scroll the page instead
+            return True
+        return False
+
+
+class Toast(QLabel):
+    """Small non-blocking notice in the window's top-right corner that fades in, stays, then fades out."""
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QGraphicsOpacityEffect
+        self.setObjectName("Toast")
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.setStyleSheet(f"QLabel#Toast {{ background: rgba(19,19,31,0.96); color: {theme.TEXT}; "
+                           f"border: 1px solid rgba(52,211,153,0.55); border-radius: 12px; padding: 10px 16px; "
+                           f"font-weight: 600; }}")
+        self._fx = QGraphicsOpacityEffect(self)
+        self._fx.setOpacity(0.0)
+        self.setGraphicsEffect(self._fx)
+        self._anim = QPropertyAnimation(self._fx, b"opacity", self)
+        self._anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._hide_timer = QTimer(self)
+        self._hide_timer.setSingleShot(True)
+        self._hide_timer.timeout.connect(lambda: self._fade(0.0, 450))
+        self.hide()
+
+    def _fade(self, to: float, ms: int) -> None:
+        self._anim.stop()
+        self._anim.setDuration(ms)
+        self._anim.setStartValue(self._fx.opacity())
+        self._anim.setEndValue(to)
+        self._anim.start()
+
+    def show_message(self, text: str, color: str = theme.GREEN, ms: int = 2600) -> None:
+        self.setText(f"✔  {text}" if color == theme.GREEN else text)
+        c = QColor(color)
+        self.setStyleSheet(self.styleSheet().split("border:")[0] +
+                           f"border: 1px solid rgba({c.red()},{c.green()},{c.blue()},0.55); border-radius: 12px; "
+                           f"padding: 10px 16px; font-weight: 600; }}")
+        self.adjustSize()
+        p = self.parentWidget()
+        self.move(p.width() - self.width() - 24, 52)       # top right, just below the title bar
+        self.show()
+        self.raise_()
+        self._fade(1.0, 220)
+        self._hide_timer.start(ms)
