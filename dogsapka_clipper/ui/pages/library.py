@@ -24,6 +24,23 @@ def open_path(p: str) -> None:
     QDesktopServices.openUrl(QUrl.fromLocalFile(str(p)))
 
 
+def reveal_in_folder(p: str) -> None:
+    """Open the file's folder with the file selected (Explorer / Finder); falls back to opening the folder."""
+    import subprocess
+    import sys
+    path = Path(p)
+    try:
+        if sys.platform == "win32" and path.exists():
+            subprocess.Popen(["explorer", "/select,", str(path)])
+            return
+        if sys.platform == "darwin" and path.exists():
+            subprocess.Popen(["open", "-R", str(path)])
+            return
+    except OSError:
+        pass
+    open_path(str(path.parent if path.suffix else path))
+
+
 class ClipCard(Card):
     def __init__(self, page, c: Clip, rank: int | None) -> None:
         super().__init__(padding=12)

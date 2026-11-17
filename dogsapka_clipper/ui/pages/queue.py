@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QHBoxLayout, QProgressBar, QPushButton, QVBoxLayout, QWidget
 from sqlalchemy import select
 
 from dogsapka_clipper.core.i18n import tr
-from dogsapka_clipper.db.models import ProcessingJob
+from dogsapka_clipper.db.models import ExportedVideo, ProcessingJob
 from dogsapka_clipper.ui import theme
 from dogsapka_clipper.ui.icons import icon
 from dogsapka_clipper.ui.pages.base import Page
@@ -15,9 +15,28 @@ COL = {"queued": theme.MUTED, "running": theme.CYAN, "paused": theme.AMBER, "don
        "failed": theme.RED, "cancelled": theme.MUTED}
 
 
+def job_video(s, j: ProcessingJob) -> str | None:
+    """The exported video a finished job produced (or uploaded), if it still exists on disk."""
+    from pathlib import Path
+    e = None
+    if (j.params or {}).get("export_id"):
+        e = s.get(ExportedVideo, int(j.params["export_id"]))
+    elif j.clip_id:
+        rows = s.scalars(select(ExportedVideo).where(ExportedVideo.clip_id == j.clip_id)
+                         .order_by(ExportedVideo.created_at.desc())).all()
+        # the export made by this job: the first one created after the job started, else the newest
+        after = [r for r in rows if j.created_at and r.created_at and r.created_at >= j.created_at]
+        e = after[-1] if after else (rows[0] if rows else None)
+    return e.path if e is not None and e.path and Path(e.path).exists() else None
+
+
 class JobRow(Card):
-    def __init__(self, page, j: ProcessingJob) -> None:
+    def __init__(self, page, j: ProcessingJob, video: str | None = None) -> None:
         super().__init__(padding=12, shadow=False)
+        self.video = video
+        if video:
+            self.setCursor(Qt.PointingHandCursor)
+            self.setToolTip(tr("q.open_tip"))
         h = QHBoxLayout()
         self.lay.addLayout(h)
         v = QVBoxLayout()
@@ -46,12 +65,23 @@ class JobRow(Card):
             btns.append(("x", tr("q.cancel"), lambda: q.cancel(j.id)))
         if j.status in ("failed", "cancelled"):
             btns.append(("refresh", tr("q.retry"), lambda: q.retry(j.id)))
+        if video:
+            from dogsapka_clipper.ui.pages.library import open_path, reveal_in_folder
+            btns.append(("play", tr("q.open_video"), lambda: open_path(video)))
+            btns.append(("folder", tr("q.open_folder"), lambda: reveal_in_folder(video)))
         for ic, tip, fn in btns:
             b = QPushButton()
             b.setIcon(icon(ic))
             b.setToolTip(tip)
             b.clicked.connect(lambda _=False, f=fn: (f(), page.refresh()))
             h.addWidget(b)
+
+    def mouseReleaseEvent(self, e):
+        # click anywhere on a finished job (not on its buttons) opens the video
+        if self.video and e.button() == Qt.LeftButton:
+            from dogsapka_clipper.ui.pages.library import open_path
+            open_path(self.video)
+        super().mouseReleaseEvent(e)
 
 
 class QueuePage(Page):
@@ -101,7 +131,7 @@ class QueuePage(Page):
         with self.backend.db.session() as s:
             jobs = s.scalars(select(ProcessingJob).order_by(ProcessingJob.id.desc()).limit(100)).all()
             for j in jobs:
-                row = JobRow(self, j)
+                row = JobRow(self, j, job_video(s, j) if j.status == "done" else None)
                 self.rows[j.id] = row
                 self.list.addWidget(row)
         if not jobs:

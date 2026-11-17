@@ -167,6 +167,9 @@ STRINGS: dict[str, dict[str, str]] = {
     # settings
     "set.save": {"en": "Save settings", "hu": "Beállítások mentése"},
     "set.saved": {"en": "Settings saved.", "hu": "Beállítások elmentve."},
+    "q.open_tip": {"en": "Click to open the finished video", "hu": "Kattints a kész videó megnyitásához"},
+    "q.open_video": {"en": "Play video", "hu": "Videó lejátszása"},
+    "q.open_folder": {"en": "Show in folder", "hu": "Megnyitás mappában"},
     "set.reset": {"en": "Reset to defaults", "hu": "Alaphelyzet"},
     "set.reset_tip": {"en": "Restore the default settings", "hu": "Gyári beállítások visszaállítása"},
     "set.reset_q": {"en": "Reset all settings to their defaults?\n\nKept: Twitch / YouTube / TikTok client IDs, API "
