@@ -260,6 +260,9 @@ class SettingsPage(Page):
         self.w["face"] = QCheckBox("Face / facecam detection for smart layouts")
         self.w["face"].setChecked(a.face_detection)
         f.addRow("", self.w["face"])
+        self.w["censor"] = QCheckBox(tr("set.censor"))
+        self.w["censor"].setChecked(a.censor_profanity)
+        f.addRow("", self.w["censor"])
         self.w["meta_lang"] = QComboBox()
         self.w["meta_lang"].addItem("English", "en")
         self.w["meta_lang"].addItem("Magyar", "hu")
@@ -382,6 +385,7 @@ class SettingsPage(Page):
         a.transcription, a.whisper_model, a.whisper_device = (w["transcription"].isChecked(), w["model"].currentText(),
                                                               w["device"].currentText())
         a.subtitle_language, a.face_detection = w["sub_lang"].currentData(), w["face"].isChecked()
+        a.censor_profanity = w["censor"].isChecked()
         a.metadata_language = w["meta_lang"].currentData()
         s.interface.language, s.interface.notifications = w["lang"].currentData(), w["notify"].isChecked()
         s.interface.auto_update_check = w["auto_update"].isChecked()

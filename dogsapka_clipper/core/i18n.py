@@ -184,6 +184,8 @@ STRINGS: dict[str, dict[str, str]] = {
     "upd.up_to_date": {"en": "You have the latest version ({cur}).", "hu": "A legfrissebb verzió van fent ({cur})."},
     "upd.auto": {"en": "Check for updates at startup", "hu": "Frissítések keresése induláskor"},
     "upd.check_now": {"en": "Check now", "hu": "Keresés most"},
+    "set.censor": {"en": "Mask swear words in subtitles (F**K, k***a)",
+                   "hu": "Csúnya szavak kicsillagozása a feliratban (F**K, k***a)"},
     "set.data_folder": {"en": "Data folder", "hu": "Adatmappa"},
     "set.data_change": {"en": "Change…", "hu": "Módosítás…"},
     "set.data_pick": {"en": "Choose a drive or folder for clips, recordings and exports",

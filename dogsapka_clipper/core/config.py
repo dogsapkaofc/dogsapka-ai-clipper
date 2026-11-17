@@ -81,6 +81,7 @@ class AISettings:
     whisper_device: str = "auto"     # auto | cpu | cuda
     subtitle_language: str = "auto"  # auto | hu | en
     face_detection: bool = True
+    censor_profanity: bool = True    # subtitles: F**K instead of FUCK (first/last letter kept)
     metadata_language: str = "en"
     title_style: str = "gaming"
 

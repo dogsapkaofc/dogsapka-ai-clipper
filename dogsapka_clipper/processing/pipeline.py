@@ -149,6 +149,9 @@ class ClipProcessor:
         ass_path = srt_path = None
         if transcript and transcript.get("segments"):
             words = shift_words(transcript_words(transcript), trim_start, length, keep)
+            if words and st.ai.censor_profanity:
+                from dogsapka_clipper.processing.profanity import mask_words
+                words = mask_words(words)
             if words:
                 if profile.get("export_srt", True):
                     srt_path = write_srt(build_captions(words, max_words=7, max_chars=42), sub_dir / f"{stem}.srt")

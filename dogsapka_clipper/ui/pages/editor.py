@@ -556,6 +556,9 @@ class EditorPage(Page):
         if self.transcript.get("segments") and self.sub_style.currentData() != "none":
             spec0 = self._spec_for_preview(None)
             words = shift_words(transcript_words(self.transcript), 0.0, self.duration)
+            if self.backend.settings.ai.censor_profanity:
+                from dogsapka_clipper.processing.profanity import mask_words
+                words = mask_words(words)
             ass = write_ass(words, tmp / "preview.ass", spec0.width, spec0.height, self.sub_style.currentData(),
                             self.accent.text(), self.sub_pos.currentData())
         spec = self._spec_for_preview(ass)
