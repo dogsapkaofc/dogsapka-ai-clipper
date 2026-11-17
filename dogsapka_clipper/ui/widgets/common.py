@@ -470,20 +470,57 @@ class ActivityFeed(QWidget):
 
 class WheelGuard(QWidget):
     """App-wide fix: the mouse wheel scrolls the page instead of changing spin boxes, combo boxes and sliders
-    the cursor happens to pass over. Those only react to the wheel after they were clicked (have focus)."""
+    the cursor happens to pass over. A field reacts to the wheel only after it was *clicked*:
+
+    * these widgets get Qt.StrongFocus, so a wheel event can no longer give them focus by itself
+      (Qt's default WheelFocus focused the field on the first wheel tick - and then let it change);
+    * a click arms the field for the wheel; leaving it (focus out) disarms it again.
+    """
+
+    @staticmethod
+    def _target(obj):
+        from PySide6.QtWidgets import QAbstractSpinBox, QComboBox, QSlider
+        w = obj
+        for _ in range(3):                    # the click may land on a spin box's inner line edit
+            if isinstance(w, (QAbstractSpinBox, QComboBox, QSlider)):
+                return w
+            w = w.parentWidget() if isinstance(w, QWidget) else None
+            if w is None:
+                return None
+        return None
 
     def eventFilter(self, obj, ev):
         from PySide6.QtCore import QEvent
-        from PySide6.QtWidgets import QAbstractScrollArea, QAbstractSpinBox, QApplication, QComboBox, QSlider
-        if ev.type() == QEvent.Wheel and isinstance(obj, (QAbstractSpinBox, QComboBox, QSlider)) \
-                and not obj.hasFocus():
-            w = obj.parentWidget()
-            while w is not None and not isinstance(w, QAbstractScrollArea):
-                w = w.parentWidget()
-            if w is not None:
-                QApplication.sendEvent(w.viewport(), ev)     # scroll the page instead
+        from PySide6.QtWidgets import QAbstractScrollArea, QApplication
+        t = ev.type()
+        if t not in (QEvent.Wheel, QEvent.MouseButtonPress, QEvent.FocusOut, QEvent.Polish):
+            return False
+        target = self._target(obj)
+        if target is None:
+            return False
+        if t == QEvent.Polish:
+            if target.focusPolicy() == Qt.WheelFocus:
+                target.setFocusPolicy(Qt.StrongFocus)
+            return False
+        if t == QEvent.MouseButtonPress:
+            target.setProperty("_wheel_armed", True)
+            return False
+        if t == QEvent.FocusOut:
+            if obj is target:
+                target.setProperty("_wheel_armed", False)
+            return False
+        # wheel - decide at the first widget that sees it (it may land on a spin box's inner line edit)
+        if target.hasFocus() and target.property("_wheel_armed"):
+            if obj is target:
+                return False                  # clicked into it: the field handles the wheel
+            QApplication.sendEvent(target, ev)    # inner line edit: hand the wheel to the field itself
             return True
-        return False
+        w = target.parentWidget()
+        while w is not None and not isinstance(w, QAbstractScrollArea):
+            w = w.parentWidget()
+        if w is not None:
+            QApplication.sendEvent(w.viewport(), ev)     # scroll the page instead
+        return True
 
 
 class Toast(QLabel):
@@ -523,7 +560,7 @@ class Toast(QLabel):
                            f"padding: 10px 16px; font-weight: 600; }}")
         self.adjustSize()
         p = self.parentWidget()
-        self.move(p.width() - self.width() - 24, 52)       # top right, just below the title bar
+        self.move(p.width() - self.width() - 30, 104)      # top right, below the page header buttons
         self.show()
         self.raise_()
         self._fade(1.0, 220)

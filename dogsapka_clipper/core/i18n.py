@@ -167,6 +167,14 @@ STRINGS: dict[str, dict[str, str]] = {
     # settings
     "set.save": {"en": "Save settings", "hu": "Beállítások mentése"},
     "set.saved": {"en": "Settings saved.", "hu": "Beállítások elmentve."},
+    "set.reset": {"en": "Reset to defaults", "hu": "Alaphelyzet"},
+    "set.reset_tip": {"en": "Restore the default settings", "hu": "Gyári beállítások visszaállítása"},
+    "set.reset_q": {"en": "Reset all settings to their defaults?\n\nKept: Twitch / YouTube / TikTok client IDs, API "
+                          "keys and connected accounts, language, data folder, your streamers and clips.",
+                    "hu": "Visszaállítod az összes beállítást az alapértékre?\n\nMegmarad: Twitch / YouTube / TikTok "
+                          "client ID-k, API kulcsok és összekötött fiókok, nyelv, adatmappa, a streamereid és "
+                          "klipjeid."},
+    "set.reset_done": {"en": "Default settings restored.", "hu": "Alapbeállítások visszaállítva."},
     "upd.title": {"en": "New version available", "hu": "Új verzió érhető el"},
     "upd.title_none": {"en": "Updates", "hu": "Frissítések"},
     "upd.versions": {"en": "Version {new} is available - you have {cur}.",

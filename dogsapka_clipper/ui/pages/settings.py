@@ -77,6 +77,11 @@ class DeviceCodeDialog(QDialog):
 class SettingsPage(Page):
     def __init__(self, win) -> None:
         super().__init__(win, tr("nav.settings"), "Everything is stored locally on this computer")
+        reset = QPushButton("  " + tr("set.reset"))
+        reset.setIcon(icon("refresh"))
+        reset.setToolTip(tr("set.reset_tip"))
+        reset.clicked.connect(self.reset_defaults)
+        self.actions.addWidget(reset)
         save = QPushButton("  " + tr("set.save"))
         save.setObjectName("Primary")
         save.setIcon(icon("check"))
@@ -483,6 +488,24 @@ class SettingsPage(Page):
         if self.backend.auth:
             self.backend.auth.logout()
         self._update_status()
+
+    def reset_defaults(self) -> None:
+        """Restore every setting to its default, keeping what connects the app to your accounts."""
+        if QMessageBox.question(self, tr("set.reset"), tr("set.reset_q")) != QMessageBox.Yes:
+            return
+        from dogsapka_clipper.core.config import AppSettings
+        old, new = self.backend.settings, AppSettings()
+        # kept: platform connection details, language, first-run state, update choices
+        new.twitch.client_id = old.twitch.client_id
+        p, q = new.publishing, old.publishing
+        p.youtube_enabled, p.youtube_client_id = q.youtube_enabled, q.youtube_client_id
+        p.tiktok_enabled, p.tiktok_client_key = q.tiktok_enabled, q.tiktok_client_key
+        i, j = new.interface, old.interface
+        i.language, i.first_run_complete = j.language, j.first_run_complete
+        i.skipped_update_version = j.skipped_update_version
+        self.backend.update_settings(new)
+        self.win.rebuild_page("settings")
+        self.win.toast(tr("set.reset_done"))
 
     def check_updates(self) -> None:
         from dogsapka_clipper.ui.update_dialog import check_for_updates

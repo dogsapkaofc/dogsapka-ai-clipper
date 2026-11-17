@@ -265,6 +265,18 @@ class MainWindow(QMainWindow):
         self._page_anim = group
         group.start()
 
+    def rebuild_page(self, key: str) -> None:
+        """Recreate a page from the current settings (e.g. after resetting them to defaults)."""
+        old = self.pages[key]
+        cls = type(old)
+        idx = self.stack.indexOf(old)
+        new = cls(self)
+        self.pages[key] = new
+        self.stack.insertWidget(idx, new)
+        self.stack.removeWidget(old)
+        old.deleteLater()
+        self.stack.setCurrentWidget(new)
+
     def open_editor(self, clip_id: int) -> None:
         self.pages["editor"].load_clip(clip_id)
         self.navigate("editor")
