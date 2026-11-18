@@ -15,3 +15,7 @@ DOGSAPKA_AI_CLIPPER_DATA/
 dist-mac/
 .venv-mac/
 packaging/dogsapka.icns
+
+# iOS build output
+ios/*.xcodeproj/
+ios/build/

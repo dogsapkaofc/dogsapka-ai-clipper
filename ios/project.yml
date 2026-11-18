@@ -1,0 +1,51 @@
+# XcodeGen project spec - generate the Xcode project with:  cd ios && xcodegen generate
+name: DogsapkaRemote
+options:
+  bundleIdPrefix: com.dogsapka
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    MARKETING_VERSION: "0.3.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.9"
+    DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
+    CODE_SIGN_STYLE: Automatic
+targets:
+  DogsapkaRemote:
+    type: application
+    platform: iOS
+    sources:
+      - path: DogsapkaRemote
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dogsapka.remote
+        PRODUCT_NAME: DOGSAPKA
+        PRODUCT_MODULE_NAME: DogsapkaRemote
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: DogsapkaRemote/Info.plist
+        ENABLE_PREVIEWS: YES
+  DogsapkaRemoteTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: DogsapkaRemoteTests
+    dependencies:
+      - target: DogsapkaRemote
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        BUNDLE_LOADER: $(TEST_HOST)
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/DOGSAPKA.app/DOGSAPKA
+schemes:
+  DogsapkaRemote:
+    build:
+      targets:
+        DogsapkaRemote: all
+        DogsapkaRemoteTests: [test]
+    test:
+      targets:
+        - DogsapkaRemoteTests
