@@ -139,6 +139,7 @@ class QueuePage(Page):
         self.rows: dict[int, JobRow] = {}
         self._row_keys: dict[int, tuple] = {}
         self._empty = label(tr("q.empty"), "Muted")
+        self._empty.setParent(holder)
         self._t = QTimer(self)
         self._t.setSingleShot(True)
         self._t.timeout.connect(self.refresh)
@@ -194,7 +195,7 @@ class QueuePage(Page):
             self.list.takeAt(0)
         for jid, row in self.rows.items():
             if current.get(jid) is not row:
-                row.setParent(None)
+                row.hide()
                 row.deleteLater()
         self.rows, self._row_keys = current, keys
         for row in current.values():

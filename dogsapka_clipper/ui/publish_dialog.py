@@ -5,6 +5,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QGuiApplication
+from shiboken6 import isValid
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFormLayout, QHBoxLayout, QLineEdit, QMessageBox,
                                QPlainTextEdit, QProgressBar, QPushButton, QVBoxLayout)
 
@@ -23,6 +24,7 @@ class PublishDialog(QDialog):
         super().__init__(parent)
         self.backend = backend
         self.export_id = export_id
+        self._uploading = False
         self.setWindowTitle("Publish")
         self.setMinimumWidth(620)
         with backend.db.session() as s:
@@ -110,6 +112,8 @@ class PublishDialog(QDialog):
         self.status.setText(f"Saved {p.name}")
 
     def upload(self) -> None:
+        if self._uploading:
+            return
         chosen = [(acc_id, mode.currentData()) for acc_id, cb, mode in self.targets if cb.isChecked()]
         if not chosen:
             QMessageBox.information(self, "Publish", "Select at least one account, or use the manual export.")
@@ -122,6 +126,7 @@ class PublishDialog(QDialog):
         b = self.backend
         title, desc = self.title.text(), self.desc.toPlainText()
         tags = self.tags.text().split()
+        self._uploading = True
         self.go.setEnabled(False)
         self.bar.setVisible(True)
         self.status.setText("Uploading…")
@@ -140,7 +145,6 @@ class PublishDialog(QDialog):
 
         def done(res):
             results, errors = res
-            self.go.setEnabled(True)
             msg = []
             for r in results:
                 if r["platform"] == "youtube":
@@ -149,11 +153,20 @@ class PublishDialog(QDialog):
                     msg.append(f"TikTok ({r['account']}): " + ("sent to the inbox - finish posting in the TikTok app"
                                                               if r.get("mode") == "inbox" else "post submitted"))
             msg += [f"Failed - {e}" for e in errors]
-            self.status.setText("\n".join(msg))
             if results:
                 b.bus.emit("video.published", "; ".join(msg), "success" if not errors else "warning")
+            if not isValid(self):
+                return
+            self._uploading = False
+            self.go.setEnabled(True)
+            self.status.setText("\n".join(msg))
+            self.bar.setVisible(False)
 
         def err(e):
+            if not isValid(self):
+                return
+            self._uploading = False
             self.go.setEnabled(True)
             self.status.setText(f"Upload failed: {e}")
+            self.bar.setVisible(False)
         run_async(job, done, err)

@@ -431,7 +431,9 @@ def clear_layout(lay) -> None:
         it = lay.takeAt(0)
         w = it.widget()
         if w:
-            w.setParent(None)
+            # Keep the existing owner until deferred deletion. Reparenting to None
+            # turns every card/control into a temporary top-level window on Windows.
+            w.hide()
             w.deleteLater()
 
 

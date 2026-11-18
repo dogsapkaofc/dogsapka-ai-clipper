@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import copy
+from dataclasses import dataclass, replace
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QColor, QPixmap
@@ -8,6 +11,7 @@ from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDoubleSpinBo
                                QLineEdit, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QSlider, QSpinBox,
                                QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget, QHeaderView)
 from sqlalchemy import select
+from shiboken6 import isValid
 
 from dogsapka_clipper.core.config import apply_preset
 from dogsapka_clipper.core.i18n import tr
@@ -30,6 +34,21 @@ STYLES = [("viral", "A · Viral Gaming"), ("clean", "B · Clean Professional"), 
           ("minimal", "D · Minimal"), ("boxed", "E · Boxed"), ("neon", "F · Neon"), ("none", "No subtitles")]
 
 
+@dataclass(frozen=True)
+class _PreviewRequest:
+    generation: int
+    clip_id: int | None
+    source: Path
+    time: float
+    duration: float
+    spec: RenderSpec
+    transcript: dict
+    style: str
+    accent: str
+    position: str
+    censor: bool
+
+
 def _player():
     try:
         from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
@@ -48,6 +67,12 @@ class EditorPage(Page):
         self.transcript: dict = {}
         self.src: Path | None = None
         self.active_job: int | None = None
+        self._preview_generation = 0
+        self._preview_active: _PreviewRequest | None = None
+        self._preview_pending: _PreviewRequest | None = None
+        self._waveform_generation = 0
+        self._waveform_active: tuple | None = None
+        self._waveform_pending: tuple | None = None
 
         self.empty = label(tr("ed.no_clip"), "Muted")
         self.empty.setAlignment(Qt.AlignCenter)
@@ -341,8 +366,18 @@ class EditorPage(Page):
             c = s.get(Clip, clip_id)
             if c is None:
                 return
+            changed = self.clip_id != clip_id or self.src != Path(c.source_path)
+            # Invalidate pending callbacks before changing the selection's widgets/data.
+            self._preview_generation += 1
+            self._preview_pending = None
+            self._waveform_generation += 1
+            self._waveform_pending = None
             self.clip_id = clip_id
             self.src = Path(c.source_path)
+            if changed:
+                self.before.setText("Loading source frame…")
+                self.after.setText("Rendering preview…")
+                self.timeline.waveform = []
             self.duration = c.duration
             ed = dict(c.edit_state or {})
             self.transcript = dict(c.transcript or {})
@@ -388,8 +423,11 @@ class EditorPage(Page):
         self._set_combo(self.title_style, st.ai.title_style)
         self._set_combo(self.meta_lang, st.ai.metadata_language)
         from dogsapka_clipper.processing.ffmpeg_utils import ENCODER_LABELS, choose_encoder
+        def encoder_done(encoder):
+            if isValid(self) and self.clip_id == clip_id:
+                self.enc_lbl.setText(ENCODER_LABELS.get(encoder, encoder))
         run_async(lambda: choose_encoder(st.output.encoder),
-                  lambda e: self.enc_lbl.setText(ENCODER_LABELS.get(e, e)))
+                  encoder_done)
         for sb in (self.t_start, self.t_end):
             sb.blockSignals(True)
             sb.setRange(0, self.duration)
@@ -418,7 +456,18 @@ class EditorPage(Page):
             self.reanalyze()
 
     def _load_waveform(self) -> None:
-        src = self.src
+        if not isValid(self) or not self.src:
+            return
+        self._waveform_generation += 1
+        request = (self._waveform_generation, self.clip_id, self.src)
+        if self._waveform_active is not None:
+            self._waveform_pending = request
+            return
+        self._start_waveform(request)
+
+    def _start_waveform(self, request: tuple) -> None:
+        self._waveform_active = request
+        generation, clip_id, src = request
 
         def job():
             import numpy as np
@@ -430,7 +479,30 @@ class EditorPage(Page):
             k = max(1, pcm.size // n)
             env = np.sqrt(np.mean(pcm[: k * n].reshape(-1, k) ** 2, axis=1))
             return list(env / (env.max() + 1e-9))
-        run_async(job, lambda w: (setattr(self.timeline, "waveform", w), self.timeline.update()))
+        def current():
+            return (isValid(self) and self.clip_id == clip_id and self.src == src and
+                    self._waveform_generation == generation)
+
+        def finish():
+            if not isValid(self) or self._waveform_active is not request:
+                return
+            self._waveform_active = None
+            pending, self._waveform_pending = self._waveform_pending, None
+            if pending is not None and pending == (self._waveform_generation, self.clip_id, self.src):
+                self._start_waveform(pending)
+
+        def done(waveform):
+            if current():
+                self.timeline.waveform = waveform
+                self.timeline.setToolTip("")
+                self.timeline.update()
+            finish()
+
+        def error(e):
+            if current():
+                self.timeline.setToolTip(f"Waveform unavailable: {e}")
+            finish()
+        run_async(job, done, error)
 
     def _set_combo(self, cb: QComboBox, key) -> None:
         i = cb.findData(key)
@@ -548,44 +620,91 @@ class EditorPage(Page):
                           crop_center_x=ed["crop_center_x"], facecam=fc, facecam_ratio=ed["facecam_ratio"], ass_path=ass)
 
     def update_preview(self) -> None:
-        if not self.src:
+        if not isValid(self) or not self.src:
             return
         t = self._cur_pos() if self.player else (self.t_start.value() + self.t_end.value()) / 2
         if t <= 0.05:
             t = min(self.duration * 0.5, self.t_start.value() + 2)
+        self._preview_generation += 1
+        request = _PreviewRequest(self._preview_generation, self.clip_id, self.src, t, self.duration,
+                                  self._spec_for_preview(None), copy.deepcopy(self.transcript),
+                                  self.sub_style.currentData(), self.accent.text(), self.sub_pos.currentData(),
+                                  self.backend.settings.ai.censor_profanity)
+        if self._preview_active is not None:
+            self._preview_pending = request
+            return
+        self._start_preview(request)
+
+    def _start_preview(self, request: _PreviewRequest) -> None:
+        self._preview_active = request
         tmp = self.backend.paths.temp
-        ass = None
-        if self.transcript.get("segments") and self.sub_style.currentData() != "none":
-            spec0 = self._spec_for_preview(None)
-            words = shift_words(transcript_words(self.transcript), 0.0, self.duration)
-            if self.backend.settings.ai.censor_profanity:
-                from dogsapka_clipper.processing.profanity import mask_words
-                words = mask_words(words)
-            ass = write_ass(words, tmp / "preview.ass", spec0.width, spec0.height, self.sub_style.currentData(),
-                            self.accent.text(), self.sub_pos.currentData())
-        spec = self._spec_for_preview(ass)
+        # Keep the previous image visible while its replacement is prepared.
+        for lbl, text in ((self.before, "Loading source frame…"), (self.after, "Rendering preview…")):
+            pm = lbl.pixmap()
+            if pm is None or pm.isNull():
+                lbl.setText(text)
+            lbl.setToolTip(text)
         from dogsapka_clipper.processing.ffmpeg_utils import extract_frame
 
         def job():
-            b = extract_frame(self.src, t, tmp / "before.jpg", width=640)
-            a = render_preview_frame(spec, t, tmp / "after.png")
-            return str(b), str(a)
+            # Requests own their ASS/images. Bytes leave the worker after its files are removed.
+            tmp.mkdir(parents=True, exist_ok=True)
+            with TemporaryDirectory(prefix="editor-preview-", dir=tmp) as directory:
+                work = Path(directory)
+                ass = None
+                if request.transcript.get("segments") and request.style != "none":
+                    words = shift_words(transcript_words(request.transcript), 0.0, request.duration)
+                    if request.censor:
+                        from dogsapka_clipper.processing.profanity import mask_words
+                        words = mask_words(words)
+                    ass = write_ass(words, work / "captions.ass", request.spec.width, request.spec.height,
+                                    request.style, request.accent, request.position)
+                spec = replace(request.spec, ass_path=ass)
+                before = extract_frame(request.source, request.time, work / "before.jpg", width=640)
+                after = render_preview_frame(spec, request.time, work / "after.png")
+                return before.read_bytes(), after.read_bytes()
+
+        def current():
+            return (isValid(self) and self.clip_id == request.clip_id and self.src == request.source and
+                    self._preview_generation == request.generation)
+
+        def finish():
+            if not isValid(self) or self._preview_active is not request:
+                return
+            self._preview_active = None
+            pending, self._preview_pending = self._preview_pending, None
+            if (pending is not None and pending.generation == self._preview_generation and
+                    pending.clip_id == self.clip_id and pending.source == self.src):
+                self._start_preview(pending)
 
         def done(r):
-            for lbl, p in zip((self.before, self.after), r):
-                pm = QPixmap(p)
-                lbl.setPixmap(pm.scaled(lbl.width() - 8, lbl.height() - 8, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        run_async(job, done, lambda e: self.after.setText(f"Preview failed:\n{e}"))
+            if current():
+                for lbl, data in zip((self.before, self.after), r):
+                    pm = QPixmap()
+                    if pm.loadFromData(data):
+                        lbl.setPixmap(pm.scaled(max(1, lbl.width() - 8), max(1, lbl.height() - 8),
+                                                Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                    else:
+                        lbl.setText("Preview image could not be loaded.")
+                    lbl.setToolTip("")
+            finish()
+
+        def error(e):
+            if current():
+                self.after.setText(f"Preview failed:\n{e}")
+                self.after.setToolTip("")
+            finish()
+        run_async(job, done, error)
 
     def reanalyze(self) -> None:
-        if not self.src:
+        if not isValid(self) or not self.src:
             return
         from dogsapka_clipper.processing.layout import analyze_layout
         self.detected.setText("Analysing…")
         src, cid = self.src, self.clip_id
 
         def done(an):
-            if self.clip_id != cid:
+            if not isValid(self) or self.clip_id != cid:
                 return
             self.analysis = an
             with self.backend.db.session() as s:
@@ -601,7 +720,10 @@ class EditorPage(Page):
                 for sb, k in zip(self.fc, "xywh"):
                     sb.setValue(getattr(an.facecam, k))
             self.update_preview()
-        run_async(lambda: analyze_layout(src), done, lambda e: self.detected.setText(f"Analysis failed: {e}"))
+        def error(e):
+            if isValid(self) and self.clip_id == cid and self.src == src:
+                self.detected.setText(f"Analysis failed: {e}")
+        run_async(lambda: analyze_layout(src), done, error)
 
     def transcribe(self) -> None:
         if self.clip_id:

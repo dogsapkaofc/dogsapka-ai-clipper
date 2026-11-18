@@ -1,5 +1,6 @@
 import os
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -9,6 +10,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication, QPushButton
+from PySide6.QtTest import QTest
 
 from dogsapka_clipper.core.i18n import tr
 from dogsapka_clipper.core.paths import AppPaths
@@ -157,16 +159,25 @@ def test_library_feedback_buttons_rate_and_clear_without_publishing(backend):
     cid = clips(backend, 1)[0]
     bridge = QtBridge(backend.bus)
     page = LibraryPage(SimpleNamespace(backend=backend, bridge=bridge, open_editor=lambda _: None))
+    def loaded():
+        deadline = time.monotonic() + 5
+        while (page._query_active or page._batch is not None) and time.monotonic() < deadline:
+            app.processEvents()
+            QTest.qWait(1)
+        assert not page._query_active and page._batch is None
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
     try:
         page.on_show()
+        loaded()
         good = next(b for b in page.findChildren(QPushButton) if b.text() == tr("lib.good_clip"))
         assert good.isEnabled()
         good.click()
         assert backend.feedback_count == 1
-        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        loaded()
         good = next(b for b in page.findChildren(QPushButton) if b.text() == tr("lib.good_clip"))
         assert good.isChecked()
         good.click()
+        loaded()
         assert backend.feedback_count == 0
         assert backend.jobs.pending_count() == 0
     finally:

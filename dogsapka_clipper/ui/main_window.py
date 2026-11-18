@@ -4,6 +4,7 @@ from __future__ import annotations
 from PySide6.QtCore import (QEasingCurve, QEvent, QParallelAnimationGroup, QPoint, QPropertyAnimation, QRect, Qt,
                             QTimer)
 from PySide6.QtGui import QAction, QColor
+from shiboken6 import isValid
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QMainWindow,
                                QMenu, QMessageBox, QPushButton, QSizeGrip, QStackedWidget, QSystemTrayIcon,
                                QVBoxLayout, QWidget)
@@ -97,6 +98,11 @@ class MainWindow(QMainWindow):
         self._nav_anim.setDuration(320)
         self._nav_anim.setEasingCurve(QEasingCurve.OutCubic)
         self._current = ""
+        self._indicator_pending = False
+        self._page_anim = None
+        self._page_overlay = None
+        self._win_anim = None
+        self._shown_once = False
         side.setFixedWidth(232)
         sv = QVBoxLayout(side)
         sv.setContentsMargins(14, 18, 14, 14)
@@ -127,6 +133,7 @@ class MainWindow(QMainWindow):
         from dogsapka_clipper.ui.pages.streamers import StreamersPage
 
         self.stack = QStackedWidget()
+        self.stack.installEventFilter(self)
         self.pages = {
             "dashboard": DashboardPage(self), "streamers": StreamersPage(self), "live": LivePage(self),
             "library": LibraryPage(self), "editor": EditorPage(self), "queue": QueuePage(self),
@@ -201,19 +208,26 @@ class MainWindow(QMainWindow):
         self._tick()
 
     def navigate(self, key: str) -> None:
+        if key not in self.pages:
+            raise KeyError(key)
+        if key == self._current and self.stack.currentWidget() is self.pages[key]:
+            return  # keep the page's scroll/selection and do not reload it on repeated clicks
+        # Capture the current composite before stopping an interrupted transition. This also
+        # handles rapid sidebar clicks without flashing an older page back on screen.
+        snapshot = self.stack.grab() if self.isVisible() and not self.isMinimized() else None
+        self._finish_page_transition()
         for k, b in self.nav_buttons.items():
             ic = next(i for kk, _, i in self.PAGES if kk == k)
             b.setChecked(k == key)
             b.setIcon(icon(ic, theme.PURPLE2 if k == key else theme.MUTED, 18))
-        same = key == self._current
         self._current = key
         self._move_indicator(animate=True)
         page = self.pages[key]
         self.stack.setCurrentWidget(page)
-        if not same:
-            self._page_transition(page)
         if hasattr(page, "on_show"):
             page.on_show()
+        if snapshot is not None and not snapshot.isNull():
+            self._page_transition(snapshot)
 
     def _indicator_rect(self) -> QRect | None:
         b = self.nav_buttons.get(self._current)
@@ -224,7 +238,6 @@ class MainWindow(QMainWindow):
     def _move_indicator(self, animate: bool) -> None:
         r = self._indicator_rect()
         if r is None:
-            QTimer.singleShot(0, lambda: self._move_indicator(False))
             return
         self.nav_bar.setGeometry(0, 10, 3, r.height() - 20)
         if not animate or not self.nav_indicator.isVisible():
@@ -239,35 +252,80 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, obj, ev):
         if obj is self.side and ev.type() in (QEvent.Resize, QEvent.Show, QEvent.LayoutRequest):
-            QTimer.singleShot(0, lambda: self._move_indicator(False))
+            self._queue_indicator_update()
+        if obj is getattr(self, "stack", None) and ev.type() == QEvent.Resize:
+            self._finish_page_transition()
         return super().eventFilter(obj, ev)
 
-    def _page_transition(self, page) -> None:
-        """New page fades in while gliding up a few pixels."""
-        eff = QGraphicsOpacityEffect(page)
-        eff.setOpacity(0.0)
-        page.setGraphicsEffect(eff)
-        group = QParallelAnimationGroup(page)
+    def _queue_indicator_update(self) -> None:
+        if self._indicator_pending or not self.isVisible():
+            return
+        self._indicator_pending = True
+        QTimer.singleShot(0, self._sync_indicator)
+
+    def _sync_indicator(self) -> None:
+        if not isValid(self):
+            return
+        self._indicator_pending = False
+        if self.isVisible():
+            if (self._nav_anim.state() == QPropertyAnimation.Running and
+                    self._nav_anim.endValue() == self._indicator_rect()):
+                return  # a redundant layout request must not snap a running sidebar animation
+            self._move_indicator(False)
+
+    def _page_transition(self, snapshot) -> None:
+        """Crossfade the outgoing image over the live page, without moving layout widgets.
+
+        Applying opacity to a whole page conflicts with its child card shadows and
+        animating its position fights QStackedWidget's layout. Only this flat overlay
+        is animated; the selected page remains fully painted below it.
+        """
+        overlay = QLabel(self.stack)
+        overlay.setObjectName("PageTransitionOverlay")
+        # Do not send clicks on still-visible outgoing controls to different incoming
+        # controls. Sidebar clicks remain available for interrupting the transition.
+        overlay.setAttribute(Qt.WA_NoMousePropagation)
+        overlay.setPixmap(snapshot)
+        overlay.setScaledContents(True)
+        overlay.setGeometry(self.stack.rect())
+        eff = QGraphicsOpacityEffect(overlay)
+        eff.setOpacity(1.0)
+        overlay.setGraphicsEffect(eff)
+        overlay.show()
+        overlay.raise_()
+        group = QParallelAnimationGroup(self)
         fade = QPropertyAnimation(eff, b"opacity")
-        fade.setDuration(260)
-        fade.setStartValue(0.0)
-        fade.setEndValue(1.0)
+        fade.setDuration(240)
+        fade.setStartValue(1.0)
+        fade.setEndValue(0.0)
         fade.setEasingCurve(QEasingCurve.OutCubic)
         group.addAnimation(fade)
-        end = page.pos()
-        slide = QPropertyAnimation(page, b"pos")
-        slide.setDuration(320)
-        slide.setStartValue(end + QPoint(0, 16))
-        slide.setEndValue(end)
+        slide = QPropertyAnimation(overlay, b"pos")
+        slide.setDuration(240)
+        slide.setStartValue(QPoint(0, 0))
+        slide.setEndValue(QPoint(0, -10))
         slide.setEasingCurve(QEasingCurve.OutCubic)
         group.addAnimation(slide)
-        group.finished.connect(lambda: page.setGraphicsEffect(None))
+        group.finished.connect(self._finish_page_transition)
+        self._page_overlay = overlay
         self._page_anim = group
         group.start()
+
+    def _finish_page_transition(self) -> None:
+        group, self._page_anim = self._page_anim, None
+        overlay, self._page_overlay = self._page_overlay, None
+        if group is not None:
+            group.stop()
+            group.deleteLater()
+        if overlay is not None:
+            overlay.hide()
+            overlay.deleteLater()
 
     def rebuild_page(self, key: str) -> None:
         """Recreate a page from the current settings (e.g. after resetting them to defaults)."""
         old = self.pages[key]
+        was_current = self.stack.currentWidget() is old
+        self._finish_page_transition()
         cls = type(old)
         idx = self.stack.indexOf(old)
         new = cls(self)
@@ -275,7 +333,10 @@ class MainWindow(QMainWindow):
         self.stack.insertWidget(idx, new)
         self.stack.removeWidget(old)
         old.deleteLater()
-        self.stack.setCurrentWidget(new)
+        if was_current:
+            self.stack.setCurrentWidget(new)
+            if hasattr(new, "on_show"):
+                new.on_show()
 
     def open_editor(self, clip_id: int) -> None:
         self.pages["editor"].load_clip(clip_id)
@@ -306,6 +367,7 @@ class MainWindow(QMainWindow):
         self._toast.show_message(text, color or theme.GREEN)
 
     def restore(self) -> None:
+        self._finish_window_fade()
         if self.isMinimized():
             self.showNormal()
         self.show()
@@ -322,10 +384,20 @@ class MainWindow(QMainWindow):
     def showEvent(self, e):
         super().showEvent(e)
         self._enable_taskbar_minimize()
-        self._fade_in()
+        if not self._shown_once:
+            self._shown_once = True
+            self._fade_in()
+        else:
+            self._finish_window_fade()
+        self._queue_indicator_update()
+
+    def hideEvent(self, e):
+        self._finish_page_transition()
+        self._finish_window_fade()
+        super().hideEvent(e)
 
     def _fade_in(self) -> None:
-        """Soft fade-in when the window opens or comes back from the tray."""
+        """Fade only the first opening; restoring the existing window preserves its frame."""
         if self.isMinimized():
             return
         self.setWindowOpacity(0.0)
@@ -334,8 +406,16 @@ class MainWindow(QMainWindow):
         a.setStartValue(0.0)
         a.setEndValue(1.0)
         a.setEasingCurve(QEasingCurve.OutCubic)
+        a.finished.connect(self._finish_window_fade)
         self._win_anim = a
         a.start()
+
+    def _finish_window_fade(self) -> None:
+        animation, self._win_anim = self._win_anim, None
+        if animation is not None:
+            animation.stop()
+            animation.deleteLater()
+        self.setWindowOpacity(1.0)
 
     def _enable_taskbar_minimize(self) -> None:
         """Frameless windows lack the Win32 minimize style, so clicking the app's taskbar button did not
