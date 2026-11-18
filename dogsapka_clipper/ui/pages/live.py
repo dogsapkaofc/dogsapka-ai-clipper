@@ -8,6 +8,7 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (QButtonGroup, QComboBox, QGridLayout, QHBoxLayout, QLabel, QProgressBar,
                                QPushButton, QVBoxLayout, QWidget)
 from sqlalchemy import select
+from shiboken6 import isValid
 
 from dogsapka_clipper.core.i18n import tr
 from dogsapka_clipper.db.models import Highlight, MonitoringSession, Streamer
@@ -241,8 +242,12 @@ class LivePage(Page):
             out = self.backend.paths.temp / f"preview_tile_{sid}.jpg"
             tile.busy = True
 
-            def done(p, tile=tile):
+            def done(p, tile=tile, sid=sid):
                 tile.busy = False
+                # A streamer-list change rebuilds the grid while frame extraction may still run.
+                # Ignore results for replaced tiles, including those awaiting deleteLater().
+                if self.tiles.get(sid) is not tile or not isValid(tile.preview):
+                    return
                 pm = QPixmap(str(p))
                 if not pm.isNull():
                     tile.preview.setPixmap(pm.scaled(tile.preview.width(), tile.preview.height(),
