@@ -58,6 +58,8 @@ class Backend:
         self.yt_monitor: YouTubeMonitor | None = None
         from dogsapka_clipper.publishing.accounts import AccountManager
         self.accounts = AccountManager(self)
+        from dogsapka_clipper.services.remote import RemoteServer
+        self.remote = RemoteServer(self, self.settings.remote.port)
         self._started = False
 
     # -- lifecycle --------------------------------------------------------
@@ -73,6 +75,7 @@ class Backend:
         self.jobs.start()
         self.call(self._async_start(monitor)).result(timeout=30)
         self.bus.emit("app.started", "DOGSAPKA AI CLIPPER backend started", "info")
+        self.apply_remote()
 
     async def _async_start(self, monitor: bool) -> None:
         self._http = httpx.AsyncClient(timeout=20)
@@ -93,6 +96,7 @@ class Backend:
     def shutdown(self) -> None:
         if not self._started:
             return
+        self.remote.stop()
         log.info("Shutting down backend")
         try:
             self.call(self._async_shutdown()).result(timeout=120)
@@ -137,6 +141,21 @@ class Backend:
             self.auth.logout()
         self.bus.emit("settings.changed", "Settings saved", "info")
         self._poke_monitors()
+        self.apply_remote()
+
+    def apply_remote(self) -> None:
+        """Start / stop / move the iPhone remote-control API to match the settings."""
+        r = self.settings.remote
+        try:
+            if r.enabled and self.remote.running and self.remote.port != r.port:
+                self.remote.stop()
+            if r.enabled and not self.remote.running:
+                self.remote.port = r.port
+                self.remote.start()
+            elif not r.enabled and self.remote.running:
+                self.remote.stop()
+        except OSError as e:
+            self.bus.emit("remote.error", f"Remote control could not start on port {r.port}: {e}", "error")
 
     def _poke_monitors(self) -> None:
         for m in (self.monitor, self.yt_monitor):

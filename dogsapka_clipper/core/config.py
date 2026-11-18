@@ -28,6 +28,13 @@ class YouTubeLiveSettings:
 
 
 @dataclass
+class RemoteSettings:
+    """Remote control from the iPhone app (local network, paired devices only)."""
+    enabled: bool = False
+    port: int = 47820
+
+
+@dataclass
 class RecordingSettings:
     enabled: bool = True
     quality: str = "best"            # streamlink quality name
@@ -117,6 +124,7 @@ class AppSettings:
     ai: AISettings = field(default_factory=AISettings)
     interface: InterfaceSettings = field(default_factory=InterfaceSettings)
     publishing: PublishingSettings = field(default_factory=PublishingSettings)
+    remote: RemoteSettings = field(default_factory=RemoteSettings)
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -168,6 +176,7 @@ class AppSettings:
         d.threshold = _clamp(d.threshold, 0.0, 100.0)
         for name in ("weight_chat_activity", "weight_chat_reactions", "weight_audio", "weight_visual"):
             setattr(d, name, _clamp(getattr(d, name), 0.0, 100.0))
+        self.remote.port = _clamp(self.remote.port, 1024, 65535)
         y = self.youtube_live
         y.poll_interval_s = _clamp(y.poll_interval_s, 30, 3600)
         y.chat_poll_s = _clamp(y.chat_poll_s, 10, 120)

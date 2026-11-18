@@ -366,6 +366,17 @@ class SettingsPage(Page):
         self.accounts_panel = AccountsPanel(self)
         c.lay.addWidget(self.accounts_panel)
         self.body.addWidget(c)
+
+        c, f = _section(tr("rc.title"), tr("rc.desc"))
+        self.w["rc_on"] = QCheckBox(tr("rc.enable"))
+        self.w["rc_on"].setChecked(s.remote.enabled)
+        f.addRow("", self.w["rc_on"])
+        self.w["rc_port"] = spin(1024, 65535, s.remote.port)
+        f.addRow(tr("rc.port"), self.w["rc_port"])
+        from dogsapka_clipper.ui.remote_panel import RemotePanel
+        self.remote_panel = RemotePanel(self)
+        c.lay.addWidget(self.remote_panel)
+        self.body.addWidget(c)
         self.body.addStretch()
         self._update_status()
 
@@ -416,6 +427,7 @@ class SettingsPage(Page):
         a.metadata_language = w["meta_lang"].currentData()
         s.interface.language, s.interface.notifications = w["lang"].currentData(), w["notify"].isChecked()
         s.interface.auto_update_check = w["auto_update"].isChecked()
+        s.remote.enabled, s.remote.port = w["rc_on"].isChecked(), w["rc_port"].value()
         p = s.publishing
         p.youtube_enabled, p.youtube_client_id, p.youtube_privacy = (w["yt_on"].isChecked(), w["yt_id"].text().strip(),
                                                                      w["yt_priv"].currentText())

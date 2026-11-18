@@ -167,6 +167,39 @@ STRINGS: dict[str, dict[str, str]] = {
     # settings
     "set.save": {"en": "Save settings", "hu": "Beállítások mentése"},
     "set.saved": {"en": "Settings saved.", "hu": "Beállítások elmentve."},
+    "rc.title": {"en": "Remote control (iPhone)", "hu": "Távirányító (iPhone)"},
+    "rc.desc": {"en": "Control DOGSAPKA from the iPhone app over your home network: live status, start/stop "
+                      "monitoring, watch and upload clips, processing queue. Only paired phones get access.",
+                "hu": "Vezéreld a DOGSAPKA-t az iPhone appból az otthoni hálózaton: élő állapot, figyelés "
+                      "indítása/leállítása, klipek megnézése és feltöltése, feldolgozási sor. Csak a párosított "
+                      "telefonok férnek hozzá."},
+    "rc.enable": {"en": "Enable remote control", "hu": "Távirányító bekapcsolása"},
+    "rc.port": {"en": "Port", "hu": "Port"},
+    "rc.pair": {"en": "Pair an iPhone", "hu": "iPhone párosítása"},
+    "rc.pair_title": {"en": "Pair your iPhone", "hu": "iPhone párosítása"},
+    "rc.pair_steps": {"en": "Open the DOGSAPKA app on your iPhone (same Wi-Fi as this computer), tap Pair and scan "
+                            "this QR code - or type the address and code below.",
+                      "hu": "Nyisd meg a DOGSAPKA appot az iPhone-on (ugyanazon a Wi-Fi-n, mint ez a gép), koppints a "
+                            "Párosítás gombra, és olvasd be ezt a QR-kódot - vagy írd be lent a címet és a kódot."},
+    "rc.manual": {"en": "Address: {addr}", "hu": "Cím: {addr}"},
+    "rc.valid": {"en": "Code valid for {m}:{s:02d}", "hu": "A kód még {m}:{s:02d}-ig érvényes"},
+    "rc.expired": {"en": "The code expired - close and open pairing again.",
+                   "hu": "A kód lejárt - zárd be, és indítsd újra a párosítást."},
+    "rc.on": {"en": "✔ Running - reachable at {addr}", "hu": "✔ Fut - elérhető itt: {addr}"},
+    "rc.off": {"en": "Off. Tick 'Enable remote control' and save to start it.",
+               "hu": "Kikapcsolva. Jelöld be a 'Távirányító bekapcsolása' négyzetet, és mentsd a beállításokat."},
+    "rc.devices": {"en": "Paired devices", "hu": "Párosított eszközök"},
+    "rc.none": {"en": "No paired device yet.", "hu": "Még nincs párosított eszköz."},
+    "rc.last_seen": {"en": "last seen {t}", "hu": "utoljára: {t}"},
+    "rc.revoke": {"en": "Revoke", "hu": "Letiltás"},
+    "rc.revoke_q": {"en": "Revoke access for {name}? The phone has to be paired again.",
+                    "hu": "Letiltod ezt az eszközt: {name}? A telefont újra párosítani kell."},
+    "rc.note": {"en": "Works on your local network. Windows asks once whether to allow DOGSAPKA through the "
+                      "firewall - allow it for private networks. For access from outside home, use a VPN such as "
+                      "Tailscale; never forward the port to the internet.",
+                "hu": "A helyi hálózaton működik. A Windows egyszer megkérdezi, átengedje-e a tűzfal a DOGSAPKA-t - "
+                      "engedélyezd a magánhálózatokon. Otthonon kívülről VPN-nel (pl. Tailscale) érd el; a portot "
+                      "soha ne nyisd ki az internet felé."},
     "live.view_all": {"en": "All live", "hu": "Összes élő"},
     "live.view_one": {"en": "One streamer", "hu": "Egy streamer"},
     "live.none": {"en": "No streamer is live right now. Monitored streamers appear here automatically when they "

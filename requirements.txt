@@ -16,3 +16,5 @@ opencv-python-headless>=4.9,<5
 # mediapipe
 # Optional: OS credential vault (falls back to Windows DPAPI)
 keyring>=24
+# iPhone remote control: pairing QR code (pure Python)
+qrcode>=7.4
