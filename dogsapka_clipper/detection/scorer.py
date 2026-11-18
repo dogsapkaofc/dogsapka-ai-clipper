@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Callable
@@ -48,12 +49,14 @@ class HighlightScorer:
 
     def __init__(self, settings: DetectionSettings, post_event_s: float,
                  on_highlight: Callable[[HighlightEvent], None],
-                 chat_delay_s: float = 5.0, eval_lag_s: float = 10.0) -> None:
+                 chat_delay_s: float = 5.0, eval_lag_s: float = 10.0,
+                 score_adjuster: Callable[[dict[str, float]], float] | None = None) -> None:
         self.s = settings
         self.post_event_s = post_event_s
         self.on_highlight = on_highlight
         self.chat_delay_s = chat_delay_s
         self.eval_lag_s = eval_lag_s
+        self.score_adjuster = score_adjuster
         self.series = {k: SecondSeries() for k in SIGNALS}
         self.available: set[str] = set()
         self._last_eval: int | None = None
@@ -92,19 +95,114 @@ class HighlightScorer:
         if not weights:
             return 0.0, {}, []
         vals: dict[str, float] = {}
+        samples: dict[str, SignalSample | None] = {}
         reasons: list[str] = []
-        for k, w in weights.items():
+        for k in weights:
             smp: SignalSample | None = self.series[k].window_max(sec - 1, sec + 1)
-            v = smp.value if smp else 0.0
+            v = self._unit(smp.value) if smp else 0.0
             vals[k] = v
+            samples[k] = smp
             if smp and smp.reason and v >= 0.5:
                 reasons.append(smp.reason)
         linear = sum(weights[k] * vals[k] for k in weights)
-        # agreement bonus: several independent signals firing together is more reliable than one
-        strong = sum(1 for v in vals.values() if v >= 0.5)
+        # Vision supplies supporting evidence. Enabling it must not lower the score
+        # of a genuine human reaction simply because the picture stays quiet.
+        human_weight = sum(w for k, w in weights.items() if k != "visual")
+        if human_weight:
+            human_linear = sum(w * vals[k] for k, w in weights.items() if k != "visual") / human_weight
+            linear = max(linear, human_linear)
+        # Message count and reacting messages come from the same chat, so they do not
+        # earn an independent-source agreement bonus for reinforcing each other.
+        chat = max(vals.get("chat_activity", 0.0), vals.get("chat_reactions", 0.0))
+        audio, visual = vals.get("audio", 0.0), vals.get("visual", 0.0)
+        reactions = vals.get("chat_reactions", 0.0)
+        strong = sum(v >= 0.5 for v in (chat, audio, visual))
         peak = max(vals.values())
         combined = linear + (0.12 * (strong - 1) if strong >= 2 else 0.0) + 0.25 * peak * (1 - linear)
-        return max(0.0, min(100.0, 100.0 * min(1.0, combined))), vals, reasons
+        score = 100.0 * min(1.0, combined)
+
+        sound = samples.get("audio")
+        voice, laugh = self._voice_evidence(sound)
+        voice_reaction = audio * voice
+        laughter = audio * laugh
+        audio_support = self._support("audio", sec)
+        voice_support = self._support("audio", sec, voiced=True)
+        reaction_support = self._support("chat_reactions", sec)
+        vals.update(laughter=laughter, voice_reaction=voice_reaction,
+                    sustained_reaction=voice_reaction * min(1.0, voice_support / 2))
+
+        # A laughing streamer or a sustained reaction can be interesting even when
+        # a small chat cannot provide enough message volume for a weighted average.
+        if laughter >= 0.45 and (voice_support >= 2 or reactions >= 0.65):
+            score = max(score, 64 + 15 * laughter)
+            reasons.append("Sustained laughter / audience reaction")
+        if voice_support >= 2 and audio >= 0.7 and voice_reaction >= 0.5:
+            score = max(score, 60 + 15 * voice_reaction)
+            reasons.append("Sustained streamer reaction")
+        if reactions >= 0.65 and reaction_support >= 2:
+            score = max(score, 64 + 10 * reactions)
+            reasons.append("Sustained audience reactions")
+        if voice_reaction >= 0.6 and (chat >= 0.45 or visual >= 0.45):
+            score = max(score, 68 + 12 * voice_reaction)
+            reasons.append("Streamer reaction matches chat / visual action")
+
+        if self.score_adjuster is not None:
+            try:
+                adjustment = float(self.score_adjuster(dict(vals)))
+                if math.isfinite(adjustment):
+                    adjustment = max(-12.0, min(12.0, adjustment))
+                    score += adjustment
+                    if abs(adjustment) >= 0.5:
+                        reasons.append(f"Your clip ratings ({adjustment:+.1f} points)")
+            except Exception:
+                # A preference model must never stop recording or highlight selection.
+                log.exception("Preference score adjustment failed")
+
+        # Learning cannot turn a loading screen, a cut, or one generic explosion
+        # into a sure highlight. Human reactions remain the strongest evidence.
+        chat_on, audio_on, visual_on = chat >= 0.5, audio >= 0.5, visual >= 0.5
+        ceiling = 100.0
+        if visual_on and not chat_on and not audio_on:
+            ceiling = 54.0
+        if chat_on and not audio_on and not visual_on:
+            ceiling = min(ceiling, 82.0 if reactions >= 0.65 and reaction_support >= 2 else 58.0 if reactions >= 0.5 else 54.0)
+        if audio_on and not chat_on and not visual_on:
+            if voice >= 0.4:
+                ceiling = min(ceiling, 82.0 if voice_support >= 2 else 58.0)
+            else:
+                ceiling = min(ceiling, 65.0 if audio_support >= 2 else 55.0)
+        known_noise = audio_on and sound is not None and ("voice" in sound.detail or "sudden loud audio" in sound.reason.lower()) and voice < 0.35
+        if known_noise and reactions < 0.5:
+            ceiling = min(ceiling, 58.0)
+        return max(0.0, min(ceiling, score)), vals, list(dict.fromkeys(reasons))
+
+    @staticmethod
+    def _unit(value: float) -> float:
+        return max(0.0, min(1.0, value)) if math.isfinite(value) else 0.0
+
+    @classmethod
+    def _voice_evidence(cls, sample: SignalSample | None) -> tuple[float, float]:
+        if sample is None:
+            return 0.0, 0.0
+        reason = sample.reason.lower()
+        voice = cls._unit(float(sample.detail.get("voice", 0.0)))
+        if "loud reaction" in reason or "excited voice" in reason or "laughter" in reason:
+            voice = max(voice, 0.8)
+        mod = cls._unit(float(sample.detail.get("mod", 0.0)))
+        laugh = voice * max(0.0, min(1.0, (mod - 0.25) / 0.25))
+        if "laughter" in reason:
+            laugh = max(laugh, voice)
+        return voice, laugh
+
+    def _support(self, signal: str, sec: int, voiced: bool = False) -> int:
+        count = 0
+        # Separate second buckets are required; a single maximum spread through
+        # the +/-1s alignment window does not count as sustained evidence.
+        for t in range(sec - 1, sec + 2):
+            sample = self.series[signal].window_max(t, t)
+            if sample and sample.value >= 0.5 and (not voiced or self._voice_evidence(sample)[0] >= 0.4):
+                count += 1
+        return count
 
     def tick(self, now: float) -> None:
         """Evaluate all whole seconds up to ``now - eval_lag``; call ~1/s."""

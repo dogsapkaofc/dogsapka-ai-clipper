@@ -175,7 +175,7 @@ class SettingsPage(Page):
         for key, text, on, wt in (("chat_activity", "Chat activity spikes", d.use_chat_activity, d.weight_chat_activity),
                                   ("chat_reactions", "Chat reactions (EN/HU)", d.use_chat_reactions, d.weight_chat_reactions),
                                   ("audio", "Audio excitement", d.use_audio, d.weight_audio),
-                                  ("visual", "Visual changes (more CPU)", d.use_visual, d.weight_visual)):
+                                  ("visual", tr("set.visual_analysis"), d.use_visual, d.weight_visual)):
             h = QHBoxLayout()
             cb = QCheckBox(text)
             cb.setChecked(on)

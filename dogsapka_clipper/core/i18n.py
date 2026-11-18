@@ -4,6 +4,16 @@ from __future__ import annotations
 _LANG = "en"
 
 STRINGS: dict[str, dict[str, str]] = {
+    "lib.good_clip": {"en": "Good clip", "hu": "Jó klip"},
+    "lib.bad_clip": {"en": "Not interesting", "hu": "Nem érdekes"},
+    "lib.feedback_tip": {"en": "Teach your preferences. Click again to clear your rating.",
+                         "hu": "Ebből tanulja meg, milyen klipeket szeretnél. Újabb kattintás törli az értékelést."},
+    "lib.feedback_unavailable": {"en": "Learning needs an original real-stream clip with detection signals.",
+                                 "hu": "A tanuláshoz eredeti, valódi streamből felismert klip szükséges."},
+    "lib.learning": {"en": "Learning: {n} rated clips · preferences apply from 4 ratings · ratings stay on this device",
+                     "hu": "Tanulás: {n} értékelt klip · 4 értékeléstől alkalmazkodik · az értékelések ezen a gépen maradnak"},
+    "set.visual_analysis": {"en": "Watch video: local action and scene analysis (2 fps)",
+                            "hu": "Képi figyelés: helyi akció- és jelenetelemzés (2 kép/mp)"},
     # navigation
     "nav.dashboard": {"en": "Dashboard", "hu": "Irányítópult"},
     "nav.streamers": {"en": "Streamers", "hu": "Streamerek"},

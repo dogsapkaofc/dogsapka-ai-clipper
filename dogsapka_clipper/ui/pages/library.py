@@ -7,9 +7,11 @@ from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
                                QSpinBox, QWidget)
 from sqlalchemy import or_, select
+from sqlalchemy.orm import joinedload, selectinload
 
 from dogsapka_clipper.core.i18n import tr
-from dogsapka_clipper.db.models import Clip, Streamer
+from dogsapka_clipper.db.models import AppSetting, Clip, Highlight, Streamer
+from dogsapka_clipper.detection.preferences import PreferenceModel, feedback_key
 from dogsapka_clipper.detection.scorer import category
 from dogsapka_clipper.ui import theme
 from dogsapka_clipper.ui.icons import icon
@@ -42,9 +44,9 @@ def reveal_in_folder(p: str) -> None:
 
 
 class ClipCard(Card):
-    def __init__(self, page, c: Clip, rank: int | None) -> None:
+    def __init__(self, page, c: Clip, rank: int | None, feedback_rating: int = 0) -> None:
         super().__init__(padding=12)
-        self.setFixedSize(300, 372)
+        self.setFixedSize(300, 418)
         thumb = QLabel()
         thumb.setFixedSize(276, 155)
         thumb.setAlignment(Qt.AlignCenter)
@@ -86,6 +88,19 @@ class ClipCard(Card):
         self.lay.addLayout(pills)
         self.setToolTip(f"{category(sc)}\nDetection score {sc:.1f} · estimated quality {c.quality_score:.1f}\n"
                         "Scores are estimates to help prioritise review, not virality predictions.")
+        feedback = QHBoxLayout()
+        rating = feedback_rating
+        eligible = bool(c.highlight and not c.highlight.session.is_simulation and c.duplicate_of is None and
+                        PreferenceModel.from_feedback([(c.highlight.signals or {}, 1)]).sample_count)
+        for value, key in ((1, "lib.good_clip"), (-1, "lib.bad_clip")):
+            btn = QPushButton(tr(key))
+            btn.setCheckable(True)
+            btn.setChecked(rating == value)
+            btn.setEnabled(eligible)
+            btn.setToolTip(tr("lib.feedback_tip" if eligible else "lib.feedback_unavailable"))
+            btn.clicked.connect(lambda checked, value=value: page.rate(c.id, value if checked else 0))
+            feedback.addWidget(btn)
+        self.lay.addLayout(feedback)
         self.lay.addStretch()
         btns = QHBoxLayout()
         ed = QPushButton("  " + tr("lib.open_editor"))
@@ -142,6 +157,8 @@ class LibraryPage(Page):
         self.body.addLayout(bar)
         self.count = label("", "Muted")
         self.body.addWidget(self.count)
+        self.learning = label("", "Muted", wrap=True)
+        self.body.addWidget(self.learning)
         holder = QWidget()
         self.flow = FlowLayout(holder)
         self.body.addWidget(holder)
@@ -153,7 +170,7 @@ class LibraryPage(Page):
         win.bridge.event.connect(self.on_event)
 
     def on_event(self, ev) -> None:
-        if ev.kind in ("clip.saved", "video.exported", "video.qc_failed", "clip.deleted", "job.done", "job.failed"):
+        if ev.kind in ("clip.saved", "video.exported", "video.qc_failed", "clip.deleted", "clip.feedback", "job.done", "job.failed"):
             self._dirty = True
             if self.isVisible():
                 self._debounce.start(400)
@@ -173,7 +190,8 @@ class LibraryPage(Page):
 
     def refresh(self) -> None:
         clear_layout(self.flow)
-        q = select(Clip).join(Streamer)
+        q = select(Clip).join(Streamer).options(joinedload(Clip.streamer), selectinload(Clip.exports),
+                                              joinedload(Clip.highlight).joinedload(Highlight.session))
         text = self.search.text().strip()
         if text:
             like = f"%{text}%"
@@ -190,15 +208,25 @@ class LibraryPage(Page):
                  "new": Clip.created_at.desc(), "duration": Clip.duration.desc()}[key]
         with self.backend.db.session() as s:
             clips = s.scalars(q.order_by(order).limit(300)).all()
+            ratings = {value["clip_id"]: value["rating"] for value in s.scalars(
+                select(AppSetting.value).where(AppSetting.key.in_([feedback_key(c.id) for c in clips])))}
             for i, c in enumerate(clips):
-                self.flow.addWidget(ClipCard(self, c, i + 1 if key in ("quality", "score") else None))
+                self.flow.addWidget(ClipCard(self, c, i + 1 if key in ("quality", "score") else None, ratings.get(c.id, 0)))
         self.count.setText(f"{len(clips)} clips")
+        self.learning.setText(tr("lib.learning").format(n=self.backend.feedback_count))
         if not clips:
             e = Card()
             e.setFixedSize(520, 100)
             e.lay.addWidget(label(tr("lib.empty"), "Muted", wrap=True))
             self.flow.addWidget(e)
         self._dirty = False
+
+    def rate(self, clip_id: int, rating: int) -> None:
+        try:
+            self.backend.set_clip_feedback(clip_id, rating)
+        except ValueError as e:
+            QMessageBox.warning(self, tr("error"), str(e))
+        self.refresh()
 
     def delete(self, clip_id: int) -> None:
         box = QMessageBox(self)

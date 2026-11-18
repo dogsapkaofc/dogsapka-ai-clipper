@@ -22,7 +22,8 @@ from dogsapka_clipper.core.events import EventBus
 from dogsapka_clipper.core.paths import AppPaths
 from dogsapka_clipper.core.secrets import SecretStore
 from dogsapka_clipper.db.database import Database
-from dogsapka_clipper.db.models import Clip, ExportedVideo, MonitoringSession, ProcessingJob, Streamer, utcnow
+from dogsapka_clipper.db.models import AppSetting, Clip, ExportedVideo, Highlight, MonitoringSession, ProcessingJob, Streamer, utcnow
+from dogsapka_clipper.detection.preferences import FEEDBACK_PREFIX, PreferenceModel, feedback_key
 from dogsapka_clipper.processing.jobs import JobQueue
 from dogsapka_clipper.processing.pipeline import ClipProcessor, seed_profiles
 from dogsapka_clipper.recording.recorder import RecorderSource
@@ -41,6 +42,10 @@ class Backend:
         self.bus = bus or EventBus()
         self.secrets = secrets or SecretStore(paths.root / "database" / "secrets.bin")
         self.settings: AppSettings = self.db.load_settings()
+        self._feedback_lock = threading.RLock()
+        self._preferences = PreferenceModel.from_feedback([])
+        self._reload_preferences()
+        self.bus.subscribe(self._on_feedback_source_changed)
         seed_profiles(self.db)
         self.jobs = JobQueue(self.db, self.bus, self.settings.output.workers)
         self.processor = ClipProcessor(self.db, paths, self.bus, lambda: self.settings)
@@ -136,6 +141,9 @@ class Backend:
         self.settings = new
         self.db.save_settings(new)
         self.jobs.set_workers(new.output.workers)
+        if self._started:
+            for session in list(self.sessions.values()):
+                self.loop.call_soon_threadsafe(session.apply_detection_settings, new.detection)
         if self.auth and new.twitch.client_id != old_client:
             self.auth.client_id = new.twitch.client_id
             self.auth.logout()
@@ -470,8 +478,66 @@ class Backend:
         return "not_connected"
 
     # -- clips ---------------------------------------------------------------------
+    def _reload_preferences(self) -> None:
+        """Rebuild from current human ratings, never from auto-generated clip success."""
+        with self._feedback_lock, self.db.session() as s:
+            rows = s.execute(select(Highlight.signals, AppSetting.value).select_from(AppSetting)
+                             .join(Clip, Clip.id == AppSetting.value["clip_id"].as_integer())
+                             .join(Highlight, Clip.highlight_id == Highlight.id)
+                             .join(MonitoringSession, MonitoringSession.id == Highlight.session_id)
+                             .where(AppSetting.key.startswith(FEEDBACK_PREFIX, autoescape=True),
+                                    MonitoringSession.is_simulation.is_(False), Clip.duplicate_of.is_(None),
+                                    AppSetting.value["rating"].as_integer().in_((-1, 1)))
+                             .order_by(AppSetting.value["rated_at"].as_string().desc()).limit(500)).all()
+            examples = [(signals or {}, state["rating"]) for signals, state in reversed(rows)]
+            self._preferences = PreferenceModel.from_feedback(examples)
+
+    @property
+    def feedback_count(self) -> int:
+        return self._preferences.sample_count
+
+    def _on_feedback_source_changed(self, ev) -> None:
+        if ev.kind not in ("video.exported", "video.qc_failed") or not ev.data.get("clip_id"):
+            return
+        with self._feedback_lock:
+            with self.db.session() as s:
+                if s.get(AppSetting, feedback_key(int(ev.data["clip_id"]))) is None:
+                    return
+            # A render can discover that a previously rated candidate is a duplicate.
+            self._reload_preferences()
+
+    def _preference_adjustment(self, signals: dict[str, float]) -> float:
+        # Immutable snapshot; the live scoring loop never waits for a database read.
+        return self._preferences.adjustment(signals)
+
+    def set_clip_feedback(self, clip_id: int, rating: int) -> None:
+        if type(rating) is not int or rating not in (-1, 0, 1):
+            raise ValueError("Clip feedback must be -1, 0 or 1")
+        with self._feedback_lock:
+            with self.db.session() as s:
+                c = s.get(Clip, clip_id)
+                if c is None:
+                    raise ValueError("Clip no longer exists")
+                if rating and (c.highlight is None or c.highlight.session.is_simulation or c.duplicate_of is not None):
+                    raise ValueError("Only original real-stream highlights can be rated for learning")
+                if rating and not PreferenceModel.from_feedback([(c.highlight.signals or {}, rating)]).sample_count:
+                    raise ValueError("This clip has no usable detection signals to learn from")
+                row = s.get(AppSetting, feedback_key(clip_id))
+                if rating:
+                    # Keep learning labels separate from edits written by render workers.
+                    value = {"clip_id": clip_id, "rating": rating, "rated_at": utcnow().isoformat()}
+                    if row is None:
+                        s.add(AppSetting(key=feedback_key(clip_id), value=value))
+                    else:
+                        row.value = value
+                elif row is not None:
+                    s.delete(row)
+            self._reload_preferences()
+        self.bus.emit("clip.feedback", "", clip_id=clip_id, rating=rating, samples=self.feedback_count)
+
     def delete_clip(self, clip_id: int, delete_exports: bool = False) -> None:
-        with self.db.session() as s:
+        # Serialize labels with deletion: SQLite may reuse a deleted maximum clip id.
+        with self._feedback_lock, self.db.session() as s:
             c = s.get(Clip, clip_id)
             if not c:
                 return
@@ -482,7 +548,11 @@ class Backend:
                     s.delete(e)
                 else:
                     e.clip_id = None
+            rating = s.get(AppSetting, feedback_key(clip_id))
+            if rating is not None:
+                s.delete(rating)
             s.delete(c)
+        self._reload_preferences()
         for f in files:
             if f:
                 try:

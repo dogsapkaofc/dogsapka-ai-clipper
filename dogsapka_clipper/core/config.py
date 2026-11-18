@@ -54,7 +54,7 @@ class DetectionSettings:
     use_chat_activity: bool = True
     use_chat_reactions: bool = True
     use_audio: bool = True
-    use_visual: bool = False
+    use_visual: bool = True          # lightweight scene analysis; existing explicit choices are retained
     weight_chat_activity: float = 35.0
     weight_chat_reactions: float = 15.0
     weight_audio: float = 30.0

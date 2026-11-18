@@ -92,13 +92,15 @@ class LiveSession:
         self.chat_react = ChatReactionDetector(sensitivity=sens)
         self.audio = AudioExcitementDetector(sensitivity=sens)
         self.visual = VisualChangeDetector(sensitivity=sens) if self.ds.use_visual else None
+        self._visual_baseline = baseline.get("visual")
         self.chat_act.load_state(baseline.get("chat_activity"))
         self.chat_react.load_state(baseline.get("chat_reactions"))
         self.audio.load_state(baseline.get("audio"))
         if self.visual:
             self.visual.load_state(baseline.get("visual"))
         self.scorer = HighlightScorer(self.ds, self.rs.post_event_s, self._on_highlight,
-                                      eval_lag_s=max(self.rs.segment_seconds * 2 + 3, self.chat_lag_s + 5))
+                                      eval_lag_s=max(self.rs.segment_seconds * 2 + 3, self.chat_lag_s + 5),
+                                      score_adjuster=backend._preference_adjustment if source.kind != "file" else None)
         self.pending: list[PendingClip] = []
         self._analysis = ThreadPoolExecutor(1, thread_name_prefix=f"analyze-{login}")
         self._clipper = ThreadPoolExecutor(1, thread_name_prefix=f"clip-{login}")
@@ -148,9 +150,13 @@ class LiveSession:
                 pcm = decode_audio_pcm(seg.path, timeout=30)
                 for ts, smp in self.audio.process(pcm, seg.start):
                     self.scorer.push("audio", ts, smp)
-            if self.visual is not None:
-                frames = decode_gray_frames(seg.path, fps=self.visual.fps, timeout=30)
-                for ts, smp in self.visual.process(frames, seg.start):
+            if self.ds.use_visual:
+                if self.visual is None:
+                    self.visual = VisualChangeDetector(sensitivity=self.ds.sensitivity)
+                    self.visual.load_state(self._visual_baseline)
+                visual = self.visual
+                frames = decode_gray_frames(seg.path, fps=visual.fps, timeout=30)
+                for ts, smp in visual.process(frames, seg.start):
                     self.scorer.push("visual", ts, smp)
         except FFmpegError as e:
             log.warning("Segment analysis failed for %s: %s", seg.path.name, e)
@@ -158,10 +164,20 @@ class LiveSession:
             log.exception("Segment analysis crashed")
 
     async def _on_chat(self, msg: ChatMessage) -> None:
-        self.chat_act.add(msg.ts, msg.user_hash)
-        self.chat_react.add(msg.ts, msg.text, msg.emotes)
+        if self.ds.use_chat_activity:
+            self.chat_act.add(msg.ts, msg.user_hash)
+        if self.ds.use_chat_reactions:
+            self.chat_react.add(msg.ts, msg.text, msg.emotes)
 
     # ------------------------------------------------------------------
+    def apply_detection_settings(self, settings) -> None:
+        """Apply on the session loop; video models are initialized on the analysis worker."""
+        self.ds = settings
+        self.scorer.s = settings
+        for detector in (self.chat_act, self.chat_react, self.audio, self.visual):
+            if detector is not None:
+                detector.sensitivity = settings.sensitivity
+
     def _on_highlight(self, ev: HighlightEvent) -> None:
         start, end = plan_window(ev.peak_ts, self.rs.pre_event_s, self.rs.post_event_s,
                                  self.rs.min_clip_s, self.rs.max_clip_s, ev.start_ts, ev.end_ts)
@@ -259,8 +275,10 @@ class LiveSession:
                 if self.ds.use_chat_activity or self.ds.use_chat_reactions:
                     if chat_task is not None:
                         t_chat = now - self.chat_lag_s
-                        self.scorer.push("chat_activity", t_chat, self.chat_act.evaluate(t_chat))
-                        self.scorer.push("chat_reactions", t_chat, self.chat_react.evaluate(t_chat))
+                        if self.ds.use_chat_activity:
+                            self.scorer.push("chat_activity", t_chat, self.chat_act.evaluate(t_chat))
+                        if self.ds.use_chat_reactions:
+                            self.scorer.push("chat_reactions", t_chat, self.chat_react.evaluate(t_chat))
                 self.scorer.tick(now)
                 self._check_pending()
                 self._update_stats()
