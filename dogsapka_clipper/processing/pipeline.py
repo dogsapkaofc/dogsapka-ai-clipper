@@ -53,16 +53,17 @@ class ClipProcessor:
         self.paths = paths
         self.bus = bus
         self.settings = settings
-        self._face = None
-        self._face_lock = threading.Lock()
+        # OpenCV's detector mutates input size / inference state. Reuse it on each worker,
+        # rather than sharing one instance across concurrently processed videos.
+        self._face_local = threading.local()
 
     def _detector(self) -> FaceDetector | None:
         if not self.settings().ai.face_detection:
             return None
-        with self._face_lock:
-            if self._face is None:
-                self._face = FaceDetector()
-            return self._face
+        detector = getattr(self._face_local, "detector", None)
+        if detector is None:
+            detector = self._face_local.detector = FaceDetector()
+        return detector
 
     # ------------------------------------------------------------------
     def handle_transcribe(self, ctx: JobContext) -> None:
@@ -102,7 +103,7 @@ class ClipProcessor:
             analysis = LayoutAnalysis.from_dict(an_dict)
         else:
             try:
-                analysis = analyze_layout(src, self._detector())
+                analysis = analyze_layout(src, self._detector(), detect_faces=st.ai.face_detection)
             except Exception as e:
                 log.warning("Layout analysis failed (%s); using centred crop", e)
                 analysis = LayoutAnalysis("gameplay", info.width, info.height)

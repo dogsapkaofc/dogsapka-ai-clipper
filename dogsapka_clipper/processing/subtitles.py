@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import re
 import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,7 +33,11 @@ class Transcriber:
     """Lazy wrapper around faster-whisper. The model loads only on first use."""
 
     _lock = threading.Lock()
-    _cache: dict[tuple, object] = {}
+    # Keep the current model and one recently used alternative. Changing model sizes repeatedly
+    # must not retain every CPU/GPU model until the application exits. Running calls hold their
+    # own reference, so removing a cache entry never unloads a model underneath inference.
+    _cache: OrderedDict[tuple, object] = OrderedDict()
+    _cache_limit = 2
     # Set after a CUDA runtime failure (e.g. cuBLAS missing). A CUDA model that failed once can hang
     # on the next call instead of raising, so it must never be reused in this process.
     _cuda_broken: str | None = None
@@ -66,18 +71,22 @@ class Transcriber:
                 device = "cpu"
         if device == "cuda" and Transcriber._cuda_broken:
             raise TranscriptionUnavailable(self._cuda_message(Transcriber._cuda_broken))
-        key = (self.model_name, device)
+        download_root = str(self.models_dir.resolve()) if self.models_dir else None
+        key = (self.model_name, device, download_root)
         with self._lock:
             if key not in self._cache:
                 compute = "float16" if device == "cuda" else "int8"
                 log.info("Loading Whisper model '%s' on %s (%s)", self.model_name, device, compute)
                 try:
                     self._cache[key] = WhisperModel(self.model_name, device=device, compute_type=compute,
-                                                    download_root=str(self.models_dir) if self.models_dir else None)
+                                                    download_root=download_root)
                 except Exception as e:
                     raise TranscriptionUnavailable(
                         f"Could not load Whisper model '{self.model_name}': {e}. The model is downloaded on first "
                         f"use - check the internet connection, or copy the model into the 'models' folder.") from e
+            self._cache.move_to_end(key)
+            while len(self._cache) > self._cache_limit:
+                self._cache.popitem(last=False)
             return self._cache[key]
 
     @classmethod
@@ -87,6 +96,7 @@ class Transcriber:
 
     def transcribe(self, media: Path, language: str = "auto", cancel: threading.Event | None = None,
                    progress=None) -> dict:
+        self._check_cancel(cancel)
         try:
             return self._transcribe(self._model(), media, language, cancel, progress)
         except (RuntimeError, OSError) as e:
@@ -99,7 +109,13 @@ class Transcriber:
             if self.device != "auto":
                 raise TranscriptionUnavailable(self._cuda_message(str(e))) from e
             log.warning("CUDA transcription unavailable (%s) - using CPU from now on", e)
+            self._check_cancel(cancel)
             return self._transcribe(self._model("cpu"), media, language, cancel, progress)
+
+    @staticmethod
+    def _check_cancel(cancel: threading.Event | None) -> None:
+        if cancel and cancel.is_set():
+            raise RuntimeError("Cancelled")
 
     @staticmethod
     def _cuda_message(err: str) -> str:
@@ -107,21 +123,34 @@ class Transcriber:
                 f"or set the Whisper device to 'cpu' / 'auto' in Settings.")
 
     def _transcribe(self, model, media: Path, language: str, cancel: threading.Event | None, progress) -> dict:
+        self._check_cancel(cancel)
         segments, info = model.transcribe(str(media), language=None if language == "auto" else language,
                                           word_timestamps=True, vad_filter=True, beam_size=5,
                                           condition_on_previous_text=False)
         out = []
         total = max(getattr(info, "duration", 0.0) or 0.0, 0.1)
-        for seg in segments:
-            if cancel and cancel.is_set():
-                raise RuntimeError("Cancelled")
-            words = [{"start": float(w.start), "end": float(w.end), "word": w.word.strip(), "prob": float(w.probability)}
-                     for w in (seg.words or []) if w.word.strip()]
-            conf = sum(w["prob"] for w in words) / len(words) if words else 0.0
-            out.append({"start": float(seg.start), "end": float(seg.end), "text": seg.text.strip(),
-                        "confidence": round(conf, 3), "words": words})
-            if progress:
-                progress(min(1.0, seg.end / total))
+        segments = iter(segments)
+        try:
+            while True:
+                # Whisper's generator does the expensive inference in next(), not transcribe().
+                # Check before advancing, so cancellation does not compute one more segment.
+                self._check_cancel(cancel)
+                try:
+                    seg = next(segments)
+                except StopIteration:
+                    break
+                self._check_cancel(cancel)
+                words = [{"start": float(w.start), "end": float(w.end), "word": w.word.strip(), "prob": float(w.probability)}
+                         for w in (seg.words or []) if w.word.strip()]
+                conf = sum(w["prob"] for w in words) / len(words) if words else 0.0
+                out.append({"start": float(seg.start), "end": float(seg.end), "text": seg.text.strip(),
+                            "confidence": round(conf, 3), "words": words})
+                if progress:
+                    progress(min(1.0, seg.end / total))
+        finally:
+            close = getattr(segments, "close", None)
+            if close is not None:
+                close()
         return {"language": info.language, "language_probability": float(info.language_probability),
                 "segments": out}
 

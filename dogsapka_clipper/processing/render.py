@@ -322,9 +322,23 @@ def render_preview_frame(spec: RenderSpec, t: float, out_png: Path, timeout: flo
     s = RenderSpec(**{**spec.__dict__})
     s.trim_start, s.trim_end, s.keep_ranges, s.zoom_at, s.fade = 0.0, None, None, None, False
     s.extra = {}
-    fg = build_video_filter(s, info, info.fps or 30)
-    args = tool_cmd("ffmpeg") + ["-hide_banner", "-loglevel", "error", "-y", "-i", str(spec.src),
-                                 "-filter_complex", fg, "-map", "[vout]", "-ss", f"{max(0.0, t):.3f}",
-                                 "-frames:v", "1", str(out_png)]
+    t = max(0.0, t)
+    args = tool_cmd("ffmpeg") + ["-hide_banner", "-loglevel", "error", "-y"]
+    # Use input seeking only for ordinary indexed local files. Live playlists, pipes and
+    # transport streams can have non-zero timestamp origins or cannot seek reliably.
+    fast_seek = spec.src.is_file() and spec.src.suffix.lower() in {".mp4", ".mkv", ".mov", ".webm", ".avi", ".m4v"}
+    if fast_seek:
+        # Keep frames from the preceding keyframe: fps can choose a frame just before
+        # t, especially with sparse/VFR footage. Accurate seeking would discard it.
+        args += ["-ss", f"{t:.3f}", "-noaccurate_seek"]
+        # Input seeking resets timestamps. Restore clip time for ASS and crop tracking.
+        fg = f"[0:v]setpts=PTS+{t:.3f}/TB[preview_in];" + build_video_filter(s, info, info.fps or 30, "[preview_in]")
+    else:
+        fg = build_video_filter(s, info, info.fps or 30)
+    args += ["-i", str(spec.src), "-filter_complex", fg, "-map", "[vout]"]
+    # fps may round its first restored timestamp down. Discard that frame for seeks
+    # between frame boundaries, just as the original full-decode preview did.
+    args += ["-ss", f"{t:.3f}"]
+    args += ["-frames:v", "1", "-fps_mode", "passthrough", str(out_png)]
     run(args, timeout=timeout)
     return out_png

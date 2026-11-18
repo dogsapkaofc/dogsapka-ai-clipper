@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import functools
+import copy
 import json
 import logging
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import threading
@@ -135,7 +137,26 @@ class MediaInfo:
 
 
 def probe(path: Path | str, timeout: float = 60) -> MediaInfo:
-    res = run(tool_cmd("ffprobe") + ["-v", "error", "-print_format", "json", "-show_format", "-show_streams", str(path)],
+    """Read metadata once per file version; keep callers' mutable results independent."""
+    try:
+        absolute = Path(path).resolve()
+        st = absolute.stat()
+    except (OSError, ValueError):
+        # Preserve FFprobe's diagnostics for missing paths and non-file inputs.
+        return _probe_uncached(path, timeout)
+    if not stat.S_ISREG(st.st_mode):
+        return _probe_uncached(path, timeout)
+    signature = (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+    return copy.deepcopy(_probe_cached(str(absolute), signature, timeout, tuple(tool_cmd("ffprobe"))))
+
+
+@functools.lru_cache(maxsize=128)
+def _probe_cached(path: str, signature: tuple, timeout: float, command: tuple[str, ...]) -> MediaInfo:
+    return _probe_uncached(path, timeout, command)
+
+
+def _probe_uncached(path: Path | str, timeout: float, command: tuple[str, ...] | None = None) -> MediaInfo:
+    res = run(list(command or tool_cmd("ffprobe")) + ["-v", "error", "-print_format", "json", "-show_format", "-show_streams", str(path)],
               timeout=timeout)
     data = json.loads(res.stdout.decode("utf-8", "replace") or "{}")
     info = MediaInfo(raw=data)

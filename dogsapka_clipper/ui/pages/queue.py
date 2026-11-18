@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QHBoxLayout, QProgressBar, QPushButton, QVBoxLayout, QWidget
-from sqlalchemy import select
+from sqlalchemy import or_, select
+from sqlalchemy.orm import joinedload, load_only
 
 from dogsapka_clipper.core.i18n import tr
-from dogsapka_clipper.db.models import ExportedVideo, ProcessingJob
+from dogsapka_clipper.db.models import Clip, ExportedVideo, ProcessingJob
 from dogsapka_clipper.ui import theme
 from dogsapka_clipper.ui.icons import icon
 from dogsapka_clipper.ui.pages.base import Page
-from dogsapka_clipper.ui.widgets.common import Card, Pill, clear_layout, label
+from dogsapka_clipper.ui.widgets.common import Card, Pill, label
 
 COL = {"queued": theme.MUTED, "running": theme.CYAN, "paused": theme.AMBER, "done": theme.GREEN,
        "failed": theme.RED, "cancelled": theme.MUTED}
@@ -28,6 +29,39 @@ def job_video(s, j: ProcessingJob) -> str | None:
         after = [r for r in rows if j.created_at and r.created_at and r.created_at >= j.created_at]
         e = after[-1] if after else (rows[0] if rows else None)
     return e.path if e is not None and e.path and Path(e.path).exists() else None
+
+
+def job_videos(s, jobs: list[ProcessingJob]) -> dict[int, str | None]:
+    """Resolve the displayed jobs' video files with one query, instead of one per row."""
+    from pathlib import Path
+    done = [j for j in jobs if j.status == "done"]
+    export_ids = {int(j.params["export_id"]) for j in done if (j.params or {}).get("export_id")}
+    clip_ids = {j.clip_id for j in done if j.clip_id and not (j.params or {}).get("export_id")}
+    if not export_ids and not clip_ids:
+        return {}
+    exports = s.scalars(select(ExportedVideo).options(load_only(ExportedVideo.id, ExportedVideo.path,
+                        ExportedVideo.clip_id, ExportedVideo.created_at)).where(or_(ExportedVideo.id.in_(export_ids),
+                        ExportedVideo.clip_id.in_(clip_ids))).order_by(ExportedVideo.created_at.desc())).all()
+    by_id = {e.id: e for e in exports}
+    by_clip = {}
+    for e in exports:
+        by_clip.setdefault(e.clip_id, []).append(e)
+    result = {}
+    exists = {}
+    for j in done:
+        if (j.params or {}).get("export_id"):
+            e = by_id.get(int(j.params["export_id"]))
+        else:
+            rows = by_clip.get(j.clip_id, [])
+            after = [r for r in rows if j.created_at and r.created_at and r.created_at >= j.created_at]
+            e = after[-1] if after else (rows[0] if rows else None)
+        if e is None or not e.path:
+            result[j.id] = None
+            continue
+        if e.path not in exists:
+            exists[e.path] = Path(e.path).exists()
+        result[j.id] = e.path if exists[e.path] else None
+    return result
 
 
 class JobRow(Card):
@@ -103,6 +137,8 @@ class QueuePage(Page):
         self.body.addWidget(holder)
         self.body.addStretch()
         self.rows: dict[int, JobRow] = {}
+        self._row_keys: dict[int, tuple] = {}
+        self._empty = label(tr("q.empty"), "Muted")
         self._t = QTimer(self)
         self._t.setSingleShot(True)
         self._t.timeout.connect(self.refresh)
@@ -127,26 +163,45 @@ class QueuePage(Page):
             r.bar.setValue(int(ev.data["progress"] * 100))
             if ev.data.get("stage"):
                 r.stage.setText(ev.data["stage"])
-        else:
+        elif not self._t.isActive():
             self._t.start(200)
 
     def refresh(self) -> None:
         paused = self.backend.jobs.globally_paused
         self.pause_all.setText("  Resume all" if paused else "  Pause all")
         self.pause_all.setIcon(icon("play" if paused else "pause"))
-        clear_layout(self.list)
-        self.rows.clear()
         with self.backend.db.session() as s:
             failed_upload = s.scalars(select(ProcessingJob.id).where(
                 ProcessingJob.kind == "upload", ProcessingJob.status == "failed").limit(1)).first()
             self.publish_again.setVisible(failed_upload is not None)
-            jobs = s.scalars(select(ProcessingJob).order_by(ProcessingJob.id.desc()).limit(100)).all()
+            jobs = s.scalars(select(ProcessingJob).options(joinedload(ProcessingJob.clip).load_only(Clip.title, Clip.reason))
+                             .order_by(ProcessingJob.id.desc()).limit(100)).all()
+            videos = job_videos(s, jobs)
+            current = {}
+            keys = {}
             for j in jobs:
-                row = JobRow(self, j, job_video(s, j) if j.status == "done" else None)
-                self.rows[j.id] = row
-                self.list.addWidget(row)
+                key = (j.kind, j.status, j.error, j.clip.title if j.clip else "",
+                       j.clip.reason if j.clip else "", videos.get(j.id))
+                row = self.rows.get(j.id)
+                if row is None or self._row_keys.get(j.id) != key:
+                    row = JobRow(self, j, videos.get(j.id))
+                else:
+                    row.bar.setValue(int(j.progress * 100))
+                    row.stage.setText(j.error[:160] if j.status == "failed" else j.stage)
+                current[j.id], keys[j.id] = row, key
+        # Reorder existing widgets without deleting them; only changed or removed rows are replaced.
+        while self.list.count():
+            self.list.takeAt(0)
+        for jid, row in self.rows.items():
+            if current.get(jid) is not row:
+                row.setParent(None)
+                row.deleteLater()
+        self.rows, self._row_keys = current, keys
+        for row in current.values():
+            self.list.addWidget(row)
+        self._empty.setVisible(not jobs)
         if not jobs:
-            self.list.addWidget(label(tr("q.empty"), "Muted"))
+            self.list.addWidget(self._empty)
 
     def clear_finished(self) -> None:
         with self.backend.db.session() as s:

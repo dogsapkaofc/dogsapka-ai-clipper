@@ -84,15 +84,18 @@ class ChatActivityDetector:
         self._msgs.append((ts, user_hash))
 
     def _trim(self, now: float) -> None:
-        while self._msgs and self._msgs[0][0] < now - max(self.window_s, 60):
-            self._msgs.popleft()
+        # Evaluation time advances monotonically. Batched/late chat can arrive out of
+        # timestamp order, so trimming only the head would strand expired messages.
+        # Keep future messages: YouTube is evaluated behind the ingestion clock.
+        cutoff = now - self.window_s
+        self._msgs = deque(item for item in self._msgs if item[0] >= cutoff)
 
     def evaluate(self, now: float) -> SignalSample:
-        """Call about once per second."""
+        """Call about once per second with monotonically advancing evaluation times."""
         self._trim(now)
-        recent = [(t, u) for t, u in self._msgs if now - self.window_s <= t <= now]
-        rate = len(recent) / self.window_s
-        uniq = len({u for _, u in recent}) / self.window_s
+        recent_users = [u for t, u in self._msgs if t <= now]
+        rate = len(recent_users) / self.window_s
+        uniq = len(set(recent_users)) / self.window_s
         self.last_rate = rate
         mean = self.rate_stats.mean
         warm = self.rate_stats.n >= 30

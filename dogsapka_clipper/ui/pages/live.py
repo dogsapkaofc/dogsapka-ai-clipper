@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (QButtonGroup, QComboBox, QGridLayout, QHBoxLayout, QLabel, QProgressBar,
                                QPushButton, QVBoxLayout, QWidget)
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from shiboken6 import isValid
 
 from dogsapka_clipper.core.i18n import tr
@@ -51,6 +51,7 @@ class LiveTile(Card):
         self.info = label("", "Muted", wrap=True)
         self.lay.addWidget(self.info)
         self.busy = False
+        self.preview_key = None
 
     def update_stats(self, st) -> None:
         self.graph.set_values([v for _, v in st.scores[-180:]])
@@ -87,6 +88,7 @@ class LivePage(Page):
         self.actions.addWidget(self.combo)
         self.sid: int | None = None
         self.tiles: dict[int, LiveTile] = {}
+        self._streamer_items = None
         self.mode = "grid"
 
         # multi-stream grid
@@ -190,7 +192,7 @@ class LivePage(Page):
 
         win.bridge.event.connect(self.on_event)
         self._preview_busy = False
-        self._last_preview = 0.0
+        self._preview_key = None
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._refresh_preview)
         self.timer.start(5000)
@@ -211,13 +213,15 @@ class LivePage(Page):
             self._refresh_preview(force=True)
 
     def show_single(self, sid: int) -> None:
-        self.set_mode("single")
         self.select_streamer(sid)
+        self.set_mode("single")
 
     def _live_streamers(self) -> list[tuple[int, str]]:
         with self.backend.db.session() as s:
-            rows = s.scalars(select(Streamer).order_by(Streamer.display_name)).all()
-            return [(r.id, r.display_name or r.login) for r in rows if r.id in self.backend.sessions or r.is_live]
+            rows = s.execute(select(Streamer.id, Streamer.display_name, Streamer.login)
+                             .where(or_(Streamer.is_live.is_(True), Streamer.id.in_(list(self.backend.sessions))))
+                             .order_by(Streamer.display_name)).all()
+            return [(r.id, r.display_name or r.login) for r in rows]
 
     def rebuild_tiles(self) -> None:
         live = self._live_streamers()
@@ -236,13 +240,19 @@ class LivePage(Page):
     def _refresh_tile_previews(self) -> None:
         for sid, tile in self.tiles.items():
             sess = self.backend.sessions.get(sid)
-            if not sess or tile.busy or not sess.buffer.segments:
+            if not sess or tile.busy:
                 continue
-            seg = sess.buffer.segments[-1]
+            segments = sess.buffer.segments
+            if not segments:
+                continue
+            seg = segments[-1]
+            key = (id(sess), str(seg.path), getattr(seg, "start", None), seg.duration)
+            if tile.preview_key == key:
+                continue
             out = self.backend.paths.temp / f"preview_tile_{sid}.jpg"
             tile.busy = True
 
-            def done(p, tile=tile, sid=sid):
+            def done(p, tile=tile, sid=sid, key=key):
                 tile.busy = False
                 # A streamer-list change rebuilds the grid while frame extraction may still run.
                 # Ignore results for replaced tiles, including those awaiting deleteLater().
@@ -252,6 +262,7 @@ class LivePage(Page):
                 if not pm.isNull():
                     tile.preview.setPixmap(pm.scaled(tile.preview.width(), tile.preview.height(),
                                                      Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                    tile.preview_key = key
 
             def err(_e, tile=tile):
                 tile.busy = False
@@ -260,30 +271,38 @@ class LivePage(Page):
 
     def reload_streamers(self) -> None:
         with self.backend.db.session() as s:
-            rows = s.scalars(select(Streamer).order_by(Streamer.is_live.desc(), Streamer.login)).all()
+            rows = s.execute(select(Streamer.id, Streamer.display_name, Streamer.login, Streamer.is_live)
+                             .order_by(Streamer.is_live.desc(), Streamer.login)).all()
             items = [(r.id, r.display_name or r.login, r.is_live) for r in rows]
+        if items == self._streamer_items:
+            return
+        self._streamer_items = items
         cur = self.sid
         self.combo.blockSignals(True)
         self.combo.clear()
         for sid, name, live in items:
             self.combo.addItem(("● " if live else "○ ") + name, sid)
-        self.combo.blockSignals(False)
         if cur is not None:
             idx = self.combo.findData(cur)
             if idx >= 0:
                 self.combo.setCurrentIndex(idx)
-        if self.combo.count() and self.sid is None:
-            self._changed(0)
+        self.combo.blockSignals(False)
+        if self.combo.currentData() != self.sid:
+            self._changed(self.combo.currentIndex())
 
     def select_streamer(self, sid: int) -> None:
         self.reload_streamers()
         idx = self.combo.findData(sid)
         if idx >= 0:
-            self.combo.setCurrentIndex(idx)
-            self._changed(idx)
+            if self.combo.currentIndex() == idx:
+                self._changed(idx)
+            else:
+                self.combo.setCurrentIndex(idx)
 
     def on_show(self) -> None:
         self.reload_streamers()
+        if self.mode == "grid":
+            self.rebuild_tiles()
 
     def _changed(self, idx: int) -> None:
         self.sid = self.combo.itemData(idx)
@@ -381,6 +400,7 @@ class LivePage(Page):
         sess = self.backend.sessions.get(self.sid) if self.sid is not None else None
         if not sess or self._preview_busy:
             if not sess:
+                self._preview_key = None
                 self.preview.setText("Stream preview appears here while a session is recording.")
                 self.preview.setPixmap(QPixmap())
             return
@@ -388,6 +408,10 @@ class LivePage(Page):
         if not segs:
             return
         seg = segs[-1]
+        sid = self.sid
+        key = (id(sess), str(seg.path), getattr(seg, "start", None), seg.duration)
+        if self._preview_key == key:
+            return
         out = self.backend.paths.temp / f"preview_{self.sid}.jpg"
         self._preview_busy = True
 
@@ -396,10 +420,16 @@ class LivePage(Page):
 
         def done(p):
             self._preview_busy = False
+            if not isValid(self.preview):
+                return
+            if self.sid != sid or self.backend.sessions.get(sid) is not sess:
+                self._refresh_preview(force=True)
+                return
             pm = QPixmap(str(p))
             if not pm.isNull():
                 self.preview.setPixmap(pm.scaled(self.preview.width(), self.preview.height(), Qt.KeepAspectRatio,
                                                  Qt.SmoothTransformation))
+                self._preview_key = key
 
         def err(e):
             self._preview_busy = False

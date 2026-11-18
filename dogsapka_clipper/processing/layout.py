@@ -361,14 +361,15 @@ def refine_facecam(grays: list[np.ndarray], face: tuple[float, float, float, flo
     return int(L), int(T), int(bw), int(bh)
 
 
-def analyze_layout(path: Path, detector: FaceDetector | None = None, n_frames: int = 20) -> LayoutAnalysis:
+def analyze_layout(path: Path, detector: FaceDetector | None = None, n_frames: int = 20,
+                   *, detect_faces: bool = True) -> LayoutAnalysis:
     frames, W, H = sample_frames(path, n_frames, width=960)
     if not frames:
         return LayoutAnalysis("gameplay", W, H)
     sh, sw = frames[0][1].shape[:2]
     scale = W / sw
-    detector = detector or FaceDetector()
-    faces_per_frame = [detector.detect(f) if detector.available else [] for _, f in frames]
+    detector = (detector or FaceDetector()) if detect_faces else None
+    faces_per_frame = [detector.detect(f) if detector and detector.available else [] for _, f in frames]
     all_faces = [f for fl in faces_per_frame for f in fl]
     grays = [f.mean(axis=2) for _, f in frames]
     # motion map for gameplay focus
