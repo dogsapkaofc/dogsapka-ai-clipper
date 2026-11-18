@@ -98,7 +98,7 @@ class ClipProcessor:
         ctx.progress(0.02, "Analyzing clip")
         info = probe(src)
         an_dict = edit.get("analysis")
-        if an_dict and an_dict.get("version") == 2 and not p.get("reanalyze"):  # re-run older analyses
+        if an_dict and an_dict.get("version") == 3 and not p.get("reanalyze"):  # re-run older analyses
             analysis = LayoutAnalysis.from_dict(an_dict)
         else:
             try:
@@ -106,7 +106,7 @@ class ClipProcessor:
             except Exception as e:
                 log.warning("Layout analysis failed (%s); using centred crop", e)
                 analysis = LayoutAnalysis("gameplay", info.width, info.height)
-            edit["analysis"] = {**analysis.to_dict(), "version": 2}
+            edit["analysis"] = {**analysis.to_dict(), "version": 3}
         ctx.progress(0.1, "Analyzing clip")
 
         # 2. transcription ----------------------------------------------------
@@ -187,7 +187,7 @@ class ClipProcessor:
             aspect=profile["aspect"], analysis=analysis,
             crop_center_x=edit.get("crop_center_x"), facecam=Rect(**fc) if fc else None,
             facecam_ratio=float(edit.get("facecam_ratio") or profile["facecam_ratio"]),
-            dynamic_focus=bool(profile.get("dynamic_focus", True)), keep_ranges=keep,
+            dynamic_focus=bool(profile.get("dynamic_focus", False)), keep_ranges=keep,
             ass_path=ass_path if (profile.get("burn_subtitles", True) and edit.get("burn_subtitles", True)) else None,
             fonts_dir=Path(__file__).resolve().parents[1] / "resources" / "fonts",
             zoom_at=zoom_at, zoom_strength=float(profile.get("zoom_strength", 0.08)),

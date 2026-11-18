@@ -27,7 +27,7 @@ from dogsapka_clipper.ui.widgets.common import Card, Pill, TimelineBar, label
 LAYOUTS = [("auto", "Auto (facecam → facecam top + game below)"), ("facecam_top", "Facecam top + gameplay"), ("crop", "Smart crop"),
            ("camera", "Streamer camera focus"), ("blur", "Blurred background (fit)"), ("source", "Original aspect")]
 STYLES = [("viral", "A · Viral Gaming"), ("clean", "B · Clean Professional"), ("dynamic", "C · Dynamic TikTok"),
-          ("minimal", "D · Minimal"), ("none", "No subtitles")]
+          ("minimal", "D · Minimal"), ("boxed", "E · Boxed"), ("neon", "F · Neon"), ("none", "No subtitles")]
 
 
 def _player():
@@ -414,6 +414,8 @@ class EditorPage(Page):
             self.player.setPosition(int(self.t_start.value() * 1000))
         self._load_waveform()
         QTimer.singleShot(50, self.update_preview)
+        if ed.get("analysis", {}).get("version") != 3 and not ed.get("facecam"):
+            self.reanalyze()
 
     def _load_waveform(self) -> None:
         src = self.src
@@ -583,11 +585,15 @@ class EditorPage(Page):
         src, cid = self.src, self.clip_id
 
         def done(an):
+            if self.clip_id != cid:
+                return
             self.analysis = an
             with self.backend.db.session() as s:
                 c = s.get(Clip, cid)
+                if c is None:
+                    return
                 ed = dict(c.edit_state or {})
-                ed["analysis"] = {**an.to_dict(), "version": 2}
+                ed["analysis"] = {**an.to_dict(), "version": 3}
                 c.edit_state = ed
             self.detected.setText(f"Detected: {an.kind} · {an.faces_found} face detections · "
                                   f"recommended '{an.recommended_layout()}'")

@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from dogsapka_clipper.core.events import EventBus
 from dogsapka_clipper.db.database import Database
-from dogsapka_clipper.db.models import ProcessingJob, utcnow
+from dogsapka_clipper.db.models import ExportedVideo, ProcessingJob, utcnow
 
 log = logging.getLogger(__name__)
 
@@ -149,6 +149,33 @@ class JobQueue:
         for ctx in self._running.values():
             ctx.pause.set() if paused else ctx.pause.clear()
         self.bus.emit("queue.paused" if paused else "queue.resumed", "")
+
+    def retry_failed_uploads(self) -> int:
+        """Retry failed account/export pairs once, without touching successful uploads."""
+        retried = []
+        with self._lock, self.db.session() as s:
+            jobs = s.scalars(select(ProcessingJob).where(ProcessingJob.kind == "upload")
+                             .order_by(ProcessingJob.id.desc())).all()
+            def key(j):
+                return (str((j.params or {}).get("account_id")), str((j.params or {}).get("export_id")))
+            active = {key(j) for j in jobs if j.status in ("queued", "running", "paused", "done")}
+            for j in jobs:
+                if j.status != "failed" or key(j) in active:
+                    continue
+                params = j.params or {}
+                if not params.get("account_id") or not params.get("export_id"):
+                    continue
+                e = s.get(ExportedVideo, int(params["export_id"]))
+                if e is None or f"account:{params['account_id']}" in (e.published or {}):
+                    continue
+                j.status, j.stage, j.error, j.progress = "queued", "Queued (publish again)", "", 0.0
+                active.add(key(j))
+                retried.append(j.id)
+        for jid in retried:
+            self.bus.emit("job.updated", "", job_id=jid)
+        with self._wake:
+            self._wake.notify_all()
+        return len(retried)
 
     @property
     def globally_paused(self) -> bool:

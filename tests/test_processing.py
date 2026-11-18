@@ -25,13 +25,27 @@ def test_captions_and_srt(tmp_path):
 
 
 def test_ass_styles(tmp_path):
-    for style in ("viral", "clean", "dynamic", "minimal"):
+    for style in ("viral", "clean", "dynamic", "minimal", "boxed", "neon"):
         p = write_ass(WORDS, tmp_path / f"{style}.ass", 1080, 1920, style=style)
         t = p.read_text()
         assert "PlayResY: 1920" in t and "Dialogue:" in t
     viral = (tmp_path / "viral.ass").read_text()
     assert "&H0000E6FF" in viral   # yellow accent (BGR) highlights the active word
     assert "INSANE" in viral
+    assert ",345,1" in viral  # 18% bottom margin at 1920p, previously 518px
+    boxed_style = next(l for l in (tmp_path / "boxed.ass").read_text().splitlines() if l.startswith("Style:"))
+    assert boxed_style.split(",")[15] == "3"  # opaque caption box
+
+
+@pytest.mark.parametrize("cam", [Rect(0, 0, 320, 240), Rect(270, 714, 488, 366),
+                                  Rect(750, 400, 300, 300), Rect(1500, 0, 420, 300)])
+def test_gameplay_crop_excludes_camera(cam):
+    from dogsapka_clipper.processing.render import gameplay_crop
+    x, y, w, h = gameplay_crop(1920, 1080, cam, 1080 / 1344)
+    assert all(v % 2 == 0 for v in (x, y, w, h))
+    assert x >= 0 and y >= 0 and x+w <= 1920 and y+h <= 1080
+    assert x+w <= cam.x or x >= cam.x+cam.w or y+h <= cam.y or y >= cam.y+cam.h
+    assert abs(w / h - 1080 / 1344) < .01
 
 
 def test_remap_time_with_silence_cut():

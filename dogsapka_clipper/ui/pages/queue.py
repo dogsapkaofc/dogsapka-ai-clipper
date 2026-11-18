@@ -90,6 +90,10 @@ class QueuePage(Page):
         self.pause_all = QPushButton()
         self.pause_all.clicked.connect(self._toggle_all)
         self.actions.addWidget(self.pause_all)
+        self.publish_again = QPushButton("Publish all again")
+        self.publish_again.setToolTip("Retry failed uploads; completed uploads are skipped")
+        self.publish_again.clicked.connect(self._publish_again)
+        self.actions.addWidget(self.publish_again)
         clr = QPushButton("Clear finished")
         clr.clicked.connect(self.clear_finished)
         self.actions.addWidget(clr)
@@ -106,6 +110,10 @@ class QueuePage(Page):
 
     def _toggle_all(self):
         self.backend.jobs.pause_all(not self.backend.jobs.globally_paused)
+        self.refresh()
+
+    def _publish_again(self):
+        self.backend.jobs.retry_failed_uploads()
         self.refresh()
 
     def on_show(self):
@@ -129,6 +137,9 @@ class QueuePage(Page):
         clear_layout(self.list)
         self.rows.clear()
         with self.backend.db.session() as s:
+            failed_upload = s.scalars(select(ProcessingJob.id).where(
+                ProcessingJob.kind == "upload", ProcessingJob.status == "failed").limit(1)).first()
+            self.publish_again.setVisible(failed_upload is not None)
             jobs = s.scalars(select(ProcessingJob).order_by(ProcessingJob.id.desc()).limit(100)).all()
             for j in jobs:
                 row = JobRow(self, j, job_video(s, j) if j.status == "done" else None)

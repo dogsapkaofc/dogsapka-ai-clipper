@@ -251,13 +251,13 @@ def find_cam_rectangle(grays: list[np.ndarray], face: tuple[float, float, float,
     for t in tops:
         for b in bottoms:
             T, B = t + 1, b                     # rectangle rows T..B
-            if B - T < 1.25 * fh or B - T > 0.9 * h:
+            if B - T < 2.0 * fh or B - T > 0.9 * h:
                 continue
             for le in lefts:
                 for r in rights:
                     L, R = le + 1, r
                     bw, bh = R - L + 1, B - T + 1
-                    if bw < 1.4 * fw or bw > 0.85 * w or not 0.6 <= bw / bh <= 2.6:
+                    if bw < 3.0 * fw or bw > 0.85 * w or not 0.6 <= bw / bh <= 2.6:
                         continue
                     sides = (side_h(t, L, R), side_h(b, L, R), side_v(le, T, B), side_v(r, T, B))
                     if min(sides) < 0.55:
@@ -406,6 +406,8 @@ def analyze_layout(path: Path, detector: FaceDetector | None = None, n_frames: i
         if frac_frames >= 0.3:
             face_box = (cx - fw / 2, cy - fh / 2, fw, fh)
             box = find_cam_rectangle(grays, face_box) or refine_facecam(grays, face_box)
+            if box is not None and (box[2] < fw * 3.0 or box[3] < fh * 2.0):
+                box = None  # an internal face/monitor edge is not the whole camera panel
             if box is not None:
                 r = Rect(int(box[0] * scale), int(box[1] * scale), int(box[2] * scale), int(box[3] * scale))
             else:

@@ -20,6 +20,29 @@ def status(db, jid):
         return s.get(ProcessingJob, jid).status
 
 
+def test_publish_all_again_only_retries_failed_unpublished_pairs(db):
+    from dogsapka_clipper.db.models import ExportedVideo
+    q = JobQueue(db, EventBus())
+    with db.session() as s:
+        a = ExportedVideo(path="a.mp4", published={"account:2": {"id": "already-published"}})
+        s.add(a)
+        s.flush()
+        for kind, state, account in [("upload", "failed", 1), ("upload", "failed", 1),
+                                     ("upload", "failed", 2), ("upload", "done", 3),
+                                     ("upload", "failed", 3), ("upload", "running", 4),
+                                     ("upload", "failed", 4), ("process", "failed", 5),
+                                     ("upload", "cancelled", 6)]:
+            s.add(ProcessingJob(kind=kind, status=state, error="old error", progress=.5,
+                                params={"account_id": account, "export_id": a.id}))
+    assert q.retry_failed_uploads() == 1
+    assert q.retry_failed_uploads() == 0
+    with db.session() as s:
+        queued = s.query(ProcessingJob).filter_by(status="queued").all()
+        assert len(queued) == 1 and queued[0].params["account_id"] == 1
+        assert queued[0].progress == 0 and queued[0].error == ""
+        assert s.query(ProcessingJob).filter_by(status="done").count() == 1
+
+
 def test_queue_runs_fails_and_retries(db):
     q = JobQueue(db, EventBus(), workers=1)
     attempts = {"n": 0}

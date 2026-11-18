@@ -7,7 +7,7 @@ DEFAULT_PROFILE = {
     "aspect": "9:16",            # "9:16" | "source"
     "layout": "auto",            # auto | facecam_top | crop | blur | camera | source
     "fallback_layout": "crop",   # used by "auto" when no facecam / camera is detected
-    "facecam_ratio": 0.38,       # share of height used by the facecam in facecam_top
+    "facecam_ratio": 0.30,       # preserve more gameplay and avoid oversized faces
     "subtitle_style": "viral",   # viral | clean | dynamic | minimal | none
     "subtitle_position": "lower",  # lower | middle | upper
     "accent_color": "#FFE600",
@@ -15,7 +15,7 @@ DEFAULT_PROFILE = {
     "font_size": 0,              # 0 = automatic (relative to height)
     "zoom": False,               # subtle zoom on the detected peak
     "zoom_strength": 0.08,
-    "dynamic_focus": True,       # follow motion/face when cropping
+    "dynamic_focus": False,      # stable framing by default
     "normalize_audio": True,
     "trim_silence": False,
     "transition": "none",        # none | fade
@@ -26,12 +26,15 @@ DEFAULT_PROFILE = {
 }
 
 BUILTIN_PROFILES: dict[str, dict] = {
-    "tiktok_gaming": {"name": "TikTok Gaming", "subtitle_style": "viral", "zoom": True, "transition": "none",
-                      "layout": "auto", "trim_silence": True},
+    "tiktok_gaming": {"name": "TikTok Gaming", "subtitle_style": "viral", "zoom": False, "transition": "none",
+                      "layout": "auto", "trim_silence": True, "quality_crf_offset": -2},
+    "gaming_boxed": {"name": "Gaming · Boxed captions", "subtitle_style": "boxed", "quality_crf_offset": -2},
+    "gaming_neon": {"name": "Gaming · Neon captions", "subtitle_style": "neon", "accent_color": "#00E5FF",
+                    "quality_crf_offset": -2},
     "youtube_shorts": {"name": "YouTube Shorts", "subtitle_style": "clean", "zoom": False, "transition": "fade",
                        "subtitle_position": "lower"},
     "streamer_reactions": {"name": "Streamer Reactions", "layout": "auto", "facecam_ratio": 0.5,
-                           "subtitle_style": "dynamic", "zoom": True, "accent_color": "#00E5FF"},
+                           "subtitle_style": "dynamic", "zoom": False, "accent_color": "#00E5FF"},
     "cinematic": {"name": "Cinematic Highlights", "subtitle_style": "minimal", "zoom": False, "transition": "fade",
                   "layout": "auto", "fallback_layout": "blur", "quality_crf_offset": -2},
     "original": {"name": "Original Clip", "aspect": "source", "layout": "source", "subtitle_style": "minimal",

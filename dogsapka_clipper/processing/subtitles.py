@@ -254,9 +254,11 @@ STYLE_PRESETS = {
     "clean": dict(size=0.042, bold=False, outline=0.0, shadow=0.002, upper=False, words=7, mode="fade"),
     "dynamic": dict(size=0.066, bold=True, outline=0.006, shadow=0.002, upper=True, words=2, mode="pop"),
     "minimal": dict(size=0.032, bold=False, outline=0.002, shadow=0, upper=False, words=8, mode="none"),
+    "boxed": dict(size=0.040, bold=True, outline=0.005, shadow=0, upper=False, words=5, mode="none"),
+    "neon": dict(size=0.052, bold=True, outline=0.003, shadow=0.003, upper=True, words=3, mode="color"),
 }
 
-POSITIONS = {"lower": (2, 0.27), "middle": (5, 0.0), "upper": (8, 0.12)}   # alignment, marginV share
+POSITIONS = {"lower": (2, 0.18), "middle": (5, 0.0), "upper": (8, 0.12)}   # alignment, marginV share
 
 
 def write_ass(captions_words: list[dict], path: Path, width: int, height: int, style: str = "viral",
@@ -264,8 +266,7 @@ def write_ass(captions_words: list[dict], path: Path, width: int, height: int, s
               font_size: int = 0) -> Path:
     """Write an animated ASS file.
 
-    The default lower position keeps captions above the bottom ~27% of the frame, which is
-    where TikTok/Shorts overlay the description and buttons (platform safe area).
+    The lower position leaves an 18% margin for platform controls.
     """
     p = STYLE_PRESETS.get(style, STYLE_PRESETS["viral"])
     ref = min(width, height * 9 / 16) if height > width else height
@@ -277,6 +278,8 @@ def write_ass(captions_words: list[dict], path: Path, width: int, height: int, s
     margin_v = int(height * mv)
     margin_h = int(width * 0.08)
     font_name = font if style in ("viral", "dynamic") else "Arial"
+    border_style = 3 if style == "boxed" else 1
+    outline_color = _ass_color(accent) if style == "neon" else "&H00000000"
     hdr = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {width}
@@ -286,7 +289,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Main,{font_name},{size},&H00FFFFFF,{_ass_color(accent)},&H00000000,&H80000000,{-1 if p['bold'] else 0},0,0,0,100,100,0,0,1,{outline},{shadow},{align},{margin_h},{margin_h},{margin_v},1
+Style: Main,{font_name},{size},&H00FFFFFF,{_ass_color(accent)},{outline_color},&H80000000,{-1 if p['bold'] else 0},0,0,0,100,100,0,0,{border_style},{outline},{shadow},{align},{margin_h},{margin_h},{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

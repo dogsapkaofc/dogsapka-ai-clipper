@@ -35,8 +35,8 @@ class RenderSpec:
     analysis: LayoutAnalysis | None = None
     crop_center_x: float | None = None         # manual override 0..1
     facecam: Rect | None = None                # manual override
-    facecam_ratio: float = 0.38
-    dynamic_focus: bool = True
+    facecam_ratio: float = 0.30
+    dynamic_focus: bool = False
     keep_ranges: list[tuple[float, float]] | None = None   # relative to trimmed clip time
     ass_path: Path | None = None
     fonts_dir: Path | None = None
@@ -131,13 +131,11 @@ def build_video_filter(spec: RenderSpec, info: MediaInfo, out_fps: float, vin: s
         fc = (spec.facecam or a.facecam).clamp(iw, ih)
         cam_h = _even(H * min(0.6, max(0.2, spec.facecam_ratio)))
         game_h = H - cam_h
-        cw = min(iw, _even(ih * W / game_h))
-        ch = min(ih, _even(cw * game_h / W))
-        gy = (ih - ch) // 2
+        gx, gy, cw, ch = gameplay_crop(iw, ih, fc, W / game_h, spec.crop_center_x)
         chains.append(f"[v0]split=2[cama][gamea];"
-                      f"[cama]crop={fc.w}:{fc.h}:{fc.x}:{fc.y},scale={W}:{cam_h}:force_original_aspect_ratio=increase:"
-                      f"flags=lanczos,crop={W}:{cam_h}[cam];"
-                      f"[gamea]crop={cw}:{ch}:'{_x_expr(track, cw)}':{gy},scale={W}:{game_h}:flags=lanczos[game];"
+                      f"[cama]crop={fc.w}:{fc.h}:{fc.x}:{fc.y},scale={W}:{cam_h}:force_original_aspect_ratio=decrease:"
+                      f"force_divisible_by=2:flags=lanczos,pad={W}:{cam_h}:(ow-iw)/2:(oh-ih)/2[cam];"
+                      f"[gamea]crop={cw}:{ch}:{gx}:{gy},scale={W}:{game_h}:flags=lanczos[game];"
                       f"[cam][game]vstack=inputs=2,setsar=1[vl]")
     else:  # crop / camera / facecam without rect
         cw = min(iw, _even(ih * W / H))
@@ -161,6 +159,30 @@ def build_video_filter(spec: RenderSpec, info: MediaInfo, out_fps: float, vin: s
     post.append("format=yuv420p")
     chains.append(f"[{last}]{','.join(post)}[vout]")
     return ";".join(chains)
+
+
+def gameplay_crop(iw: int, ih: int, cam: Rect, aspect: float,
+                  center_x: float | None = None) -> tuple[int, int, int, int]:
+    """Largest static gameplay crop outside the camera overlay."""
+    regions = [(0, 0, cam.x, ih), (cam.x + cam.w, 0, iw - cam.x - cam.w, ih),
+               (0, 0, iw, cam.y), (0, cam.y + cam.h, iw, ih - cam.y - cam.h)]
+    crops = []
+    cx = iw * (0.5 if center_x is None else center_x)
+    for x, y, w, h in regions:
+        # Align the allowed region inward before calculating the crop.
+        x2, y2 = (x + w) // 2 * 2, (y + h) // 2 * 2
+        x, y = (x + 1) // 2 * 2, (y + 1) // 2 * 2
+        w, h = x2 - x, y2 - y
+        cw = int(min(w, h * aspect)) // 2 * 2
+        ch = int(min(h, cw / aspect)) // 2 * 2
+        if min(cw, ch) < 2:
+            continue
+        gx = max(x, min(x2 - cw, int(cx - cw / 2))) // 2 * 2
+        gy = max(y, min(y2 - ch, int(ih / 2 - ch / 2))) // 2 * 2
+        crops.append((cw * ch, -abs(gx + cw / 2 - cx), (gx, gy, cw, ch)))
+    if not crops:
+        raise FFmpegError("Facecam covers the source frame; choose the camera or source layout.")
+    return max(crops)[2]
 
 
 def build_audio_filter(spec: RenderSpec, out_duration: float, ain: str = "[0:a]") -> str:
