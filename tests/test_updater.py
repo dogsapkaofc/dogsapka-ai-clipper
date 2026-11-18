@@ -74,3 +74,16 @@ def test_download_verifies_checksum(tmp_path):
 def test_source_checkout_updates_with_git():
     assert U.source_checkout() is not None          # tests run from the git clone
     assert U.can_self_install(U.UpdateInfo("9.9.9", "", ""))   # even without installer: git pull
+
+
+def test_ios_app_releases_are_ignored(monkeypatch):
+    """The repo also publishes iPhone-app releases ("ios-v..."): the desktop updater must skip them."""
+    monkeypatch.setattr(U.sys, "platform", "win32")
+    ios = {"tag_name": "ios-v9.9.9", "body": "", "html_url": "x", "assets": [
+        {"name": "DOGSAPKA_Remote_9.9.9_unsigned.ipa", "browser_download_url": "https://dl/x.ipa", "size": 1}]}
+    lst = [ios, release("v0.4.0"), release("v0.3.0")]
+    http = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=lst)))
+    info = U.check_for_update("0.2.2", http=http)
+    assert info.version == "0.4.0" and info.asset_url == "https://dl/win.exe"
+    only_ios = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=[ios])))
+    assert U.check_for_update("0.2.2", http=only_ios) is None

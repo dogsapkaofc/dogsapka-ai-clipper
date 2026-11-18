@@ -29,7 +29,8 @@ from dogsapka_clipper import __version__
 log = logging.getLogger(__name__)
 
 REPO = "guralynoel/dogsapka-ai-clipper"
-LATEST_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
+RELEASES_URL = f"https://api.github.com/repos/{REPO}/releases"
+DESKTOP_TAG = re.compile(r"^[vV]\d+(\.\d+)*$")
 RELEASES_PAGE = f"https://github.com/{REPO}/releases/latest"
 
 
@@ -86,8 +87,9 @@ def check_for_update(current: str = __version__, http: httpx.Client | None = Non
     """Return info about a newer release, or None. Network problems raise UpdateError."""
     client = http or httpx.Client(timeout=15, follow_redirects=True)
     try:
-        r = client.get(LATEST_URL, headers={"Accept": "application/vnd.github+json",
-                                            "User-Agent": "DOGSAPKA-AI-CLIPPER-updater"})
+        # the repo also has iPhone-app releases ("ios-v…"): only desktop releases ("v1.2.3") count
+        r = client.get(RELEASES_URL, params={"per_page": 30},
+                       headers={"Accept": "application/vnd.github+json", "User-Agent": "DOGSAPKA-AI-CLIPPER-updater"})
     except httpx.HTTPError as e:
         raise UpdateError(f"Could not check for updates: {e}") from e
     finally:
@@ -97,9 +99,13 @@ def check_for_update(current: str = __version__, http: httpx.Client | None = Non
         return None                      # no releases yet
     if r.status_code != 200:
         raise UpdateError(f"Update check failed (HTTP {r.status_code}).")
-    rel = r.json()
-    if rel.get("draft") or rel.get("prerelease"):
+    data = r.json()
+    releases = data if isinstance(data, list) else [data]
+    desktop = [x for x in releases if not x.get("draft") and not x.get("prerelease")
+               and DESKTOP_TAG.match(x.get("tag_name") or "")]
+    if not desktop:
         return None
+    rel = max(desktop, key=lambda x: parse_version(x["tag_name"]))
     version = (rel.get("tag_name") or "").lstrip("vV")
     if not version or not is_newer(version, current) or version == skip_version:
         return None
