@@ -18,7 +18,10 @@ Write-Host "==> Generating icon"
 .\.venv\Scripts\python.exe packaging\make_icon.py
 
 Write-Host "==> PyInstaller"
+# Prefer Windows DLLs (notably Qt's system ICU) over unrelated tools on PATH.
+$env:PATH = "$env:SystemRoot\System32;$env:PATH"
 .\.venv\Scripts\pyinstaller.exe packaging\dogsapka.spec --noconfirm --distpath dist --workpath build
+if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed - aborting build" }
 $tools = "dist\DOGSAPKA AI CLIPPER\tools"
 New-Item -ItemType Directory -Force $tools | Out-Null
 
@@ -42,6 +45,8 @@ Copy-Item $sl.FullName "$tools\streamlink" -Recurse -Force
 Write-Host "==> Building installer"
 $iscc = (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source
 if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+if (-not (Test-Path $iscc)) { $iscc = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" }
+if (-not (Test-Path $iscc)) { throw "Inno Setup 6 not found" }
 $version = (.\.venv\Scripts\python.exe -c "import dogsapka_clipper; print(dogsapka_clipper.__version__)").Trim()
 Write-Host "Version $version"
 # antivirus scanners sometimes lock the new Setup.exe for a moment ("EndUpdateResource failed"): retry
