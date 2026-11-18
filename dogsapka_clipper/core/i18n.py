@@ -4,6 +4,26 @@ from __future__ import annotations
 _LANG = "en"
 
 STRINGS: dict[str, dict[str, str]] = {
+    "yt.schedule_enable": {"en": "Schedule automatic YouTube uploads: publish publicly up to 3 times a day",
+                            "hu": "YouTube automatikus ütemezés: naponta legfeljebb 3 nyilvános videó"},
+    "yt.schedule_times": {"en": "Daily publication times", "hu": "Napi közzétételi időpontok"},
+    "yt.schedule_timezone": {"en": "Timezone", "hu": "Időzóna"},
+    "yt.schedule_mode": {"en": "Scheduled public (3/day)", "hu": "Ütemezett nyilvános (3/nap)"},
+    "yt.schedule_note": {"en": "Automatic YouTube uploads are uploaded privately, then YouTube publishes them at these times, "
+                                  "up to 3 per day per channel. Extra videos go to later days. Enable automatic upload globally "
+                                  "and for each channel below. Ready clips are required. The app can be closed after scheduling. "
+                                  "Changing these settings does not change existing YouTube schedules.",
+                          "hu": "Az automatikus YouTube-feltöltések először privátak, majd a YouTube teszi őket nyilvánossá "
+                                "a megadott időpontokban, csatornánként legfeljebb napi 3-at. A többi a következő napokra kerül. "
+                                "Lent kapcsold be az automatikus feltöltést globálisan és csatornánként is. Kész klipek szükségesek. "
+                                "Az ütemezés után a program bezárható. A beállítás módosítása nem írja át a már ütemezett videókat."},
+    "yt.schedule_permission": {"en": "Already connected? Use Reauthorize for YouTube scheduling permission and select the same channel.",
+                                "hu": "Már csatlakoztattad? Az Újraengedélyezés gombbal add meg az időzítéshez szükséges hozzáférést, ugyanazt a csatornát kiválasztva."},
+    "yt.reauthorize": {"en": "Reauthorize", "hu": "Újraengedélyezés"},
+    "yt.schedule_pending": {"en": "   • uploaded privately; retry scheduling", "hu": "   • privátként feltöltve; ütemezés újrapróbálható"},
+    "yt.scheduled_for": {"en": "scheduled for {when} ({zone})", "hu": "ütemezve: {when} ({zone})"},
+    "yt.schedule_manual_note": {"en": "Choose Scheduled public to use the next free daily slot. Private, unlisted and public are immediate upload choices.",
+                                 "hu": "Az Ütemezett nyilvános mód a következő szabad napi időpontot foglalja. A privát, nem listázott és nyilvános mód azonnali feltöltést jelent."},
     "lib.good_clip": {"en": "Good clip", "hu": "Jó klip"},
     "lib.bad_clip": {"en": "Not interesting", "hu": "Nem érdekes"},
     "lib.feedback_tip": {"en": "Teach your preferences. Click again to clear your rating.",

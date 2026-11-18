@@ -6,8 +6,10 @@ YouTube decides how it is surfaced - nothing here guarantees recommendation.
 from __future__ import annotations
 
 import json
+import re
 import time
 import urllib.parse
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -19,13 +21,21 @@ from dogsapka_clipper.publishing.oauth import OAuthError, loopback_authorize, pk
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
+VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
 CHANNELS_URL = "https://www.googleapis.com/youtube/v3/channels"
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/youtube.readonly"]
+SCOPES = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/youtube.readonly",
+          "https://www.googleapis.com/auth/youtube.force-ssl"]
 CHUNK = 8 * 1024 * 1024
 
 
 class YouTubeError(RuntimeError):
-    pass
+    upload_uncertain = False
+
+
+class YouTubeUploadUncertainError(YouTubeError):
+    """The server may have completed an upload whose response was lost."""
+
+    upload_uncertain = True
 
 
 class YouTubeClient:
@@ -95,13 +105,49 @@ class YouTubeClient:
         items = r.json().get("items", []) if r.status_code == 200 else []
         return items[0]["snippet"]["title"] if items else ""
 
+    def channel_id(self) -> str:
+        r = self.http.get(CHANNELS_URL, params={"part": "id", "mine": "true"},
+                          headers={"Authorization": f"Bearer {self.token()}"})
+        if r.status_code != 200:
+            raise YouTubeError(f"Could not verify the YouTube channel: {_err(r)}")
+        items = r.json().get("items", [])
+        if len(items) != 1 or not items[0].get("id"):
+            raise YouTubeError("Choose one YouTube channel when signing in.")
+        return items[0]["id"]
+
+    def schedule(self, video_id: str, publish_at: datetime | str) -> str:
+        """Schedule an uploaded, never-published private video; return its UTC publication time."""
+        scheduled = _normalize_publish_at(publish_at)
+        if not isinstance(video_id, str) or not video_id.strip():
+            raise YouTubeError("A video ID is required to schedule publication.")
+        r = self.http.put(VIDEOS_URL, params={"part": "status"},
+                          headers={"Authorization": f"Bearer {self.token()}"},
+                          json={"id": video_id, "status": {"privacyStatus": "private", "publishAt": scheduled,
+                                                          "selfDeclaredMadeForKids": False}})
+        if r.status_code != 200:
+            if r.status_code == 403 and ("insufficientPermissions" in r.text
+                                        or "insufficient authentication scopes" in r.text.lower()
+                                        or "insufficient_scope" in r.headers.get("WWW-Authenticate", "")):
+                raise YouTubeError("YouTube scheduling needs additional permission. Reconnect your YouTube account "
+                                   "in Settings → Publishing, then retry. The uploaded video remains private.")
+            raise YouTubeError(f"YouTube rejected scheduled publication: {_err(r)}")
+        return scheduled
+
     def upload(self, path: Path, title: str, description: str, tags: list[str], privacy: str = "private",
-               progress: Callable[[float], None] | None = None, category_id: str = "20") -> str:
-        """Resumable upload; returns the video id. ``category_id`` 20 = Gaming."""
+               progress: Callable[[float], None] | None = None, category_id: str = "20",
+               publish_at: datetime | str | None = None) -> str:
+        """Resumable upload; returns the video id. ``category_id`` 20 = Gaming.
+
+        ``publish_at`` schedules publication on YouTube and forces private upload visibility.
+        For long uploads, upload privately first and call :meth:`schedule` after saving the returned ID.
+        """
+        scheduled = _normalize_publish_at(publish_at) if publish_at is not None else None
         size = path.stat().st_size
         meta = {"snippet": {"title": title[:100], "description": description[:5000],
                             "tags": [t.lstrip("#") for t in tags][:30], "categoryId": category_id},
                 "status": {"privacyStatus": privacy, "selfDeclaredMadeForKids": False}}
+        if scheduled is not None:
+            meta["status"].update(privacyStatus="private", publishAt=scheduled)
         r = self.http.post(UPLOAD_URL, params={"uploadType": "resumable", "part": "snippet,status"},
                            headers={"Authorization": f"Bearer {self.token()}", "Content-Type": "application/json",
                                     "X-Upload-Content-Type": "video/mp4", "X-Upload-Content-Length": str(size)},
@@ -130,19 +176,54 @@ class YouTubeClient:
                     sent = int(rng.split("-")[1]) + 1 if rng else 0
                     retries = 0
                 elif r is None or r.status_code >= 500:
-                    retries += 1
-                    if retries > 6:
-                        raise YouTubeError("Upload failed repeatedly - check your connection and retry.")
-                    time.sleep(min(60, 2 ** retries))
-                    q = self.http.put(session, headers={"Authorization": f"Bearer {self.token()}",
-                                                         "Content-Range": f"bytes */{size}"})
-                    rng = q.headers.get("Range")
-                    sent = int(rng.split("-")[1]) + 1 if rng else 0
+                    # Do not send bytes again until YouTube confirms how much it received.
+                    # A lost final response can already represent a completed upload.
+                    while True:
+                        retries += 1
+                        if retries > 6:
+                            raise YouTubeUploadUncertainError(
+                                "Could not confirm whether YouTube completed the upload. Check YouTube Studio "
+                                "before retrying to avoid uploading the same video twice.")
+                        time.sleep(min(60, 2 ** retries))
+                        try:
+                            q = self.http.put(session, headers={"Authorization": f"Bearer {self.token()}",
+                                                                 "Content-Range": f"bytes */{size}"})
+                        except httpx.HTTPError:
+                            continue
+                        if q.status_code in (200, 201):
+                            if progress:
+                                progress(1.0)
+                            return q.json()["id"]
+                        if q.status_code == 308:
+                            rng = q.headers.get("Range")
+                            sent = int(rng.split("-")[1]) + 1 if rng else 0
+                            break
+                        if q.status_code >= 500:
+                            continue
+                        raise YouTubeUploadUncertainError(
+                            f"Could not confirm the YouTube upload: {_err(q)}. Check YouTube Studio before retrying.")
                 else:
                     raise YouTubeError(f"Upload failed: {_err(r)}")
                 if progress:
                     progress(sent / size)
-        raise YouTubeError("Upload did not complete.")
+        raise YouTubeUploadUncertainError("YouTube did not confirm upload completion. Check YouTube Studio before retrying.")
+
+
+def _normalize_publish_at(value: datetime | str) -> str:
+    """Reject ambiguous/local or elapsed times before any API request can publish a video."""
+    try:
+        if isinstance(value, str):
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})", value):
+                raise ValueError
+            value = datetime.fromisoformat(value.upper().replace("Z", "+00:00"))
+        if not isinstance(value, datetime) or value.utcoffset() is None:
+            raise ValueError
+        utc = value.astimezone(timezone.utc)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise YouTubeError("Publication time must be a timezone-aware datetime or RFC 3339 timestamp.") from exc
+    if utc <= datetime.now(timezone.utc):
+        raise YouTubeError("Publication time must be in the future.")
+    return utc.isoformat().replace("+00:00", "Z")
 
 
 def _err(r: httpx.Response) -> str:

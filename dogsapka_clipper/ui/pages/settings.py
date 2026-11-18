@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import copy
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTime
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFormLayout, QHBoxLayout,
-                               QLabel, QLineEdit, QMessageBox, QPushButton, QSlider, QSpinBox, QVBoxLayout, QWidget)
+                               QLabel, QLineEdit, QMessageBox, QPushButton, QSlider, QSpinBox, QTimeEdit, QVBoxLayout, QWidget)
 
 from dogsapka_clipper.core.config import AppSettings, apply_preset
 from dogsapka_clipper.core.i18n import tr
@@ -351,6 +351,23 @@ class SettingsPage(Page):
         self.w["yt_priv"].addItems(["private", "unlisted", "public"])
         self.w["yt_priv"].setCurrentText(p.youtube_privacy)
         f.addRow("Default privacy", self.w["yt_priv"])
+        self.w["yt_schedule"] = QCheckBox(tr("yt.schedule_enable"))
+        self.w["yt_schedule"].setChecked(p.youtube_schedule_enabled)
+        f.addRow("", self.w["yt_schedule"])
+        slots = QHBoxLayout()
+        for i, clock in enumerate(p.youtube_schedule_times):
+            edit = QTimeEdit(QTime.fromString(clock, "HH:mm"))
+            edit.setDisplayFormat("HH:mm")
+            edit.setMinimumWidth(95)
+            self.w[f"yt_time_{i}"] = edit
+            slots.addWidget(edit)
+        slots.addStretch()
+        f.addRow(tr("yt.schedule_times"), slots)
+        self.w["yt_timezone"] = QLineEdit(p.youtube_schedule_timezone)
+        self.w["yt_timezone"].setPlaceholderText("Europe/Budapest")
+        f.addRow(tr("yt.schedule_timezone"), self.w["yt_timezone"])
+        f.addRow("", label(tr("yt.schedule_note"), "Muted", wrap=True))
+        f.addRow("", label(tr("yt.schedule_permission"), "Muted", wrap=True))
         f.addRow("TikTok", links((tr("lnk.tt_apps"), "https://developers.tiktok.com/apps/"),
                                  (tr("lnk.tt_docs"), "https://developers.tiktok.com/doc/content-posting-api-get-started")))
         self.w["tt_on"] = QCheckBox("Enable TikTok upload (requires an approved TikTok developer app)")
@@ -432,13 +449,21 @@ class SettingsPage(Page):
         p.youtube_enabled, p.youtube_client_id, p.youtube_privacy = (w["yt_on"].isChecked(), w["yt_id"].text().strip(),
                                                                      w["yt_priv"].currentText())
         p.tiktok_enabled, p.tiktok_client_key = w["tt_on"].isChecked(), w["tt_key"].text().strip()
+        p.youtube_schedule_enabled = w["yt_schedule"].isChecked()
+        p.youtube_schedule_times = [w[f"yt_time_{i}"].time().toString("HH:mm") for i in range(3)]
+        p.youtube_schedule_timezone = w["yt_timezone"].text().strip()
         return s
 
-    def save(self, quiet: bool = False) -> None:
+    def save(self, quiet: bool = False) -> bool:
         s = self.collect()
         if s.recording.min_clip_s > s.recording.max_clip_s:
             QMessageBox.warning(self, tr("error"), "Minimum clip length cannot exceed the maximum.")
-            return
+            return False
+        try:
+            s.validate()
+        except ValueError as exc:
+            QMessageBox.warning(self, tr("error"), str(exc))
+            return False
         lang_changed = s.interface.language != self.backend.settings.interface.language
         self.backend.update_settings(s)
         for key, store_key in (("client_secret", "twitch_client_secret"), ("yt_secret", "youtube_client_secret"),
@@ -452,9 +477,10 @@ class SettingsPage(Page):
             self.w["yt_api_key"].setPlaceholderText(tr("set.yt_key_set"))
         self._update_status()
         if quiet:
-            return
+            return True
         # short confirmation in the top-right corner instead of a pop-up dialog
         self.win.toast(tr("set.saved") + ("  " + tr("set.restart") if lang_changed else ""))
+        return True
 
     def connect_twitch(self) -> None:
         self.save()

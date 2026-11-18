@@ -1,6 +1,6 @@
 [project]
 name = "dogsapka-ai-clipper"
-version = "0.3.1"
+version = "0.3.2"
 description = "AI-powered Twitch highlight detection and automatic short-form video editor"
 requires-python = ">=3.11"
 readme = "README.md"

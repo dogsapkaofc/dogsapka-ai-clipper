@@ -107,6 +107,9 @@ class PublishingSettings:
     youtube_enabled: bool = False
     youtube_client_id: str = ""
     youtube_privacy: str = "private"
+    youtube_schedule_enabled: bool = False
+    youtube_schedule_times: list[str] = field(default_factory=lambda: ["09:00", "15:00", "21:00"])
+    youtube_schedule_timezone: str = "Europe/Budapest"
     tiktok_enabled: bool = False
     tiktok_client_key: str = ""
     auto_publish: bool = False       # requires explicit opt-in + authorization
@@ -150,20 +153,37 @@ class AppSettings:
                 val = values[sf.name]
                 try:
                     if isinstance(default, bool):
-                        val = bool(val)
+                        val = (val if isinstance(val, bool) else False) if sf.name == "youtube_schedule_enabled" else bool(val)
                     elif isinstance(default, int):
                         val = int(val)
                     elif isinstance(default, float):
                         val = float(val)
                     elif isinstance(default, str):
                         val = str(val)
+                    elif isinstance(default, list):
+                        if not isinstance(val, list) or any(not isinstance(v, str) for v in val):
+                            raise ValueError("Expected a list of strings")
+                        val = list(val)
                 except (TypeError, ValueError):
                     continue
                 setattr(section, sf.name, val)
+        from dogsapka_clipper.publishing.schedule import DEFAULT_TIMES, DEFAULT_TIMEZONE, validate_schedule
+        try:
+            validate_schedule(inst.publishing.youtube_schedule_times, inst.publishing.youtube_schedule_timezone)
+            raw = data.get("publishing", {})
+            if isinstance(raw, dict) and "youtube_schedule_times" in raw:
+                validate_schedule(raw["youtube_schedule_times"], inst.publishing.youtube_schedule_timezone)
+        except ValueError:
+            inst.publishing.youtube_schedule_enabled = False
+            inst.publishing.youtube_schedule_times = list(DEFAULT_TIMES)
+            inst.publishing.youtube_schedule_timezone = DEFAULT_TIMEZONE
         inst.validate()
         return inst
 
     def validate(self) -> None:
+        from dogsapka_clipper.publishing.schedule import validate_schedule
+        p = self.publishing
+        p.youtube_schedule_times = list(validate_schedule(p.youtube_schedule_times, p.youtube_schedule_timezone))
         r = self.recording
         r.buffer_seconds = _clamp(r.buffer_seconds, 30, 300)
         r.segment_seconds = _clamp(r.segment_seconds, 1, 10)

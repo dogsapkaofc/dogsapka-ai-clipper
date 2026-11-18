@@ -19,6 +19,10 @@ TT_LABELS = {"inbox": "TikTok inbox (finish in app)", "SELF_ONLY": "Direct post:
              "PUBLIC_TO_EVERYONE": "Direct post: public"}
 
 
+def youtube_mode_label(mode: str) -> str:
+    return tr("yt.schedule_mode") if mode == "scheduled" else mode
+
+
 class StreamerFilterDialog(QDialog):
     """Choose which streamers' clips go to an account (none checked = all streamers)."""
 
@@ -103,7 +107,7 @@ class AccountsPanel(QWidget):
         h.addWidget(label(acc.name), 1)
         priv = QComboBox()
         for m in (YT_PRIVACY if yt else TT_MODES):
-            priv.addItem(m if yt else TT_LABELS[m], m)
+            priv.addItem(youtube_mode_label(m) if yt else TT_LABELS[m], m)
         priv.setCurrentIndex(max(0, priv.findData(acc.privacy)))
         priv.currentIndexChanged.connect(lambda _=0, a=acc.id, c=priv: self.backend.accounts.update(a, privacy=c.currentData()))
         h.addWidget(priv)
@@ -116,6 +120,11 @@ class AccountsPanel(QWidget):
         auto.setChecked(acc.auto_upload)
         auto.toggled.connect(lambda on, a=acc.id: self.backend.accounts.update(a, auto_upload=on))
         h.addWidget(auto)
+        if yt:
+            reconnect = QPushButton(tr("yt.reauthorize"))
+            reconnect.setToolTip(tr("yt.schedule_permission"))
+            reconnect.clicked.connect(lambda _=False, a=acc.id: self.reauthorize_youtube(a))
+            h.addWidget(reconnect)
         rm = QPushButton()
         rm.setObjectName("Danger")
         rm.setIcon(icon("trash", theme.RED))
@@ -134,7 +143,8 @@ class AccountsPanel(QWidget):
             self.backend.accounts.remove(acc.id)
 
     def _connect(self, fn, platform: str) -> None:
-        self.page.save(quiet=True)      # client id / secret typed above must be stored first
+        if self.page.save(quiet=True) is False:
+            return
         p = self.backend.settings.publishing
         if platform == "youtube" and not p.youtube_client_id:
             QMessageBox.warning(self, "YouTube", tr("acc.need_yt_creds"))
@@ -148,6 +158,9 @@ class AccountsPanel(QWidget):
 
     def add_youtube(self) -> None:
         self._connect(self.backend.accounts.add_youtube, "youtube")
+
+    def reauthorize_youtube(self, acc_id: int) -> None:
+        self._connect(lambda: self.backend.accounts.reconnect_youtube(acc_id), "youtube")
 
     def add_tiktok(self) -> None:
         direct = QMessageBox.question(self, "TikTok", tr("acc.tt_direct_q")) == QMessageBox.Yes

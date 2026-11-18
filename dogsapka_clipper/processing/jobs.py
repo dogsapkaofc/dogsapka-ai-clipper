@@ -166,7 +166,8 @@ class JobQueue:
                 if not params.get("account_id") or not params.get("export_id"):
                     continue
                 e = s.get(ExportedVideo, int(params["export_id"]))
-                if e is None or f"account:{params['account_id']}" in (e.published or {}):
+                result = (e.published or {}).get(f"account:{params['account_id']}") if e else None
+                if e is None or (result and result.get("state") != "schedule_pending"):
                     continue
                 j.status, j.stage, j.error, j.progress = "queued", "Queued (publish again)", "", 0.0
                 active.add(key(j))

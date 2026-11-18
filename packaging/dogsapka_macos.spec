@@ -9,11 +9,13 @@ import sys
 sys.path.insert(0, str(root))
 from dogsapka_clipper import __version__ as VERSION  # noqa: E402
 datas = collect_data_files("faster_whisper") + collect_data_files("cv2", includes=["data/*.xml"])
+datas += collect_data_files("tzdata")
 datas += collect_data_files("streamlink") + collect_data_files("streamlink_cli")
 datas += [(str(root / "dogsapka_clipper" / "assets" / "face_detection_yunet_2023mar.onnx"), "dogsapka_clipper/assets")]
 hidden = (collect_submodules("dogsapka_clipper") + collect_submodules("streamlink") + collect_submodules("streamlink_cli")
           + ["keyring.backends.macOS", "ctranslate2"])
 icns = root / "packaging" / "dogsapka.icns"
+hidden += collect_submodules("tzdata")
 
 a = Analysis([str(root / "dogsapka_clipper" / "__main__.py")], pathex=[str(root)], datas=datas,
              hiddenimports=hidden, excludes=["tkinter", "matplotlib", "IPython", "pytest", "pandas", "scipy"])

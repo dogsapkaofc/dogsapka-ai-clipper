@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QGuiApplication
@@ -10,6 +12,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFormLayout, QHBox
                                QPlainTextEdit, QProgressBar, QPushButton, QVBoxLayout)
 
 from dogsapka_clipper.db.models import ExportedVideo
+from dogsapka_clipper.core.i18n import tr
 from dogsapka_clipper.ui.bridge import run_async
 from dogsapka_clipper.ui.pages.library import open_path
 from dogsapka_clipper.ui.widgets.common import label
@@ -61,19 +64,22 @@ class PublishDialog(QDialog):
 
         v.addWidget(label("Official platform upload", "H2"))
         from dogsapka_clipper.publishing.accounts import TT_MODES, YT_PRIVACY, published_key
-        from dogsapka_clipper.ui.accounts_panel import TT_LABELS
+        from dogsapka_clipper.ui.accounts_panel import TT_LABELS, youtube_mode_label
         with backend.db.session() as s:
-            done = set((s.get(ExportedVideo, export_id).published or {}).keys())
+            published = s.get(ExportedVideo, export_id).published or {}
         self.targets: list[tuple[int, QCheckBox, QComboBox]] = []
         for acc in backend.accounts.list():
             yt = acc.platform == "youtube"
             row = QHBoxLayout()
+            result = published.get(published_key(acc.id), {})
+            state = (tr("yt.schedule_pending") if result.get("state") == "schedule_pending" else
+                     "   ✔ already uploaded" if result else "")
             cb = QCheckBox(f"{'YouTube' if yt else 'TikTok'}: {acc.name}"
-                           + ("   ✔ already uploaded" if published_key(acc.id) in done else ""))
+                           + state)
             row.addWidget(cb, 1)
             mode = QComboBox()
             for m in (YT_PRIVACY if yt else TT_MODES):
-                mode.addItem(m if yt else TT_LABELS[m], m)
+                mode.addItem(youtube_mode_label(m) if yt else TT_LABELS[m], m)
             mode.setCurrentIndex(max(0, mode.findData(acc.privacy)))
             row.addWidget(mode)
             v.addLayout(row)
@@ -81,6 +87,7 @@ class PublishDialog(QDialog):
         if not self.targets:
             v.addWidget(label("No accounts connected. Add YouTube channels / TikTok accounts in Settings → Publishing "
                               "(requires your own Google / TikTok developer credentials).", "Muted", wrap=True))
+        v.addWidget(label(tr("yt.schedule_manual_note"), "Muted", wrap=True))
         v.addWidget(label("Being uploaded vertically does not guarantee a video is shown as a Short or recommended.",
                           "Muted", wrap=True))
         self.confirm = QCheckBox("I confirm I have the rights and the streamer's permission to publish this content")
@@ -148,7 +155,13 @@ class PublishDialog(QDialog):
             msg = []
             for r in results:
                 if r["platform"] == "youtube":
-                    msg.append(f"YouTube ({r['account']}): uploaded (video id {r['id']}, {r['privacy']})")
+                    if r.get("state") == "scheduled":
+                        when = datetime.fromisoformat(r["publish_at"].replace("Z", "+00:00"))
+                        zone = r.get("timezone", b.settings.publishing.youtube_schedule_timezone)
+                        when = when.astimezone(ZoneInfo(zone)).strftime("%Y-%m-%d %H:%M")
+                        msg.append(f"YouTube ({r['account']}): " + tr("yt.scheduled_for", when=when, zone=zone))
+                    else:
+                        msg.append(f"YouTube ({r['account']}): uploaded (video id {r['id']}, {r['privacy']})")
                 else:
                     msg.append(f"TikTok ({r['account']}): " + ("sent to the inbox - finish posting in the TikTok app"
                                                               if r.get("mode") == "inbox" else "post submitted"))

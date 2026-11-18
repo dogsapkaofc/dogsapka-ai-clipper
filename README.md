@@ -22,6 +22,7 @@ subtitled 9:16 videos for TikTok and YouTube Shorts.
 | QC | Missing audio, silent audio, black frames, wrong duration/dimensions, decode errors |
 | Export | Standard/High/Ultra/Custom presets, NVENC (verified by a real test encode) with automatic CPU fallback, fps never upsampled |
 | Publishing | Manual export (always), YouTube resumable upload, TikTok inbox upload / direct post — each requires explicit confirmation |
+| YouTube schedule | Optional 3 public videos/day/channel at editable times (09:00, 15:00, 21:00 Europe/Budapest by default); uploaded privately, scheduled on YouTube; [setup and retry behavior](docs/youtube-scheduling.md) |
 | UI | Frameless PySide6 app: Dashboard, Streamers, Live Monitor, Clip Library, AI Editor, Processing queue, Settings, setup wizard, EN/HU |
 | Simulation | Generates a local "livestream" with known highlights + simulated chat, runs the full real pipeline without Twitch |
 
@@ -53,7 +54,7 @@ DOGSAPKA_AI_CLIPPER/ recordings/ clips/ exports/ thumbnails/ subtitles/ cache/ l
 .\packaging\build_windows.ps1   # venv, tests, PyInstaller, bundles FFmpeg + Streamlink, Inno Setup installer
 ```
 
-Produces `dist\DOGSAPKA AI CLIPPER\DOGSAPKA AI CLIPPER.exe` and `dist\installer\DOGSAPKA_AI_CLIPPER_Setup_0.1.0.exe`
+Produces `dist\DOGSAPKA AI CLIPPER\DOGSAPKA AI CLIPPER.exe` and `dist\installer\DOGSAPKA_AI_CLIPPER_Setup_0.3.2.exe`
 (Start-menu shortcut, optional desktop icon, Hungarian/English installer). The Whisper model (default
 `small`, ~460 MB) downloads into `models/` on first transcription; choose `tiny`/`base` for slow PCs.
 

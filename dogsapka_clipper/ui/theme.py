@@ -74,14 +74,15 @@ QPushButton#TitleBtn {{ background: transparent; border: none; border-radius: 8p
 QPushButton#TitleBtn:hover {{ background: rgba(255,255,255,0.07); }}
 QPushButton#CloseBtn {{ background: transparent; border: none; border-radius: 8px; padding: 4px 10px; }}
 QPushButton#CloseBtn:hover {{ background: {RED}; }}
-QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QPlainTextEdit, QTextEdit {{
+QLineEdit, QSpinBox, QDoubleSpinBox, QTimeEdit, QComboBox, QPlainTextEdit, QTextEdit {{
     background: {FIELD}; border: 1px solid {GLASS_BORDER}; border-radius: 10px; padding: 7px 10px;
     selection-background-color: {PURPLE}; }}
-QLineEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover, QComboBox:hover, QPlainTextEdit:hover {{
+QLineEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover, QTimeEdit:hover, QComboBox:hover, QPlainTextEdit:hover {{
     border-color: rgba(255,255,255,0.13); }}
-QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus, QPlainTextEdit:focus {{
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QTimeEdit:focus, QComboBox:focus, QPlainTextEdit:focus {{
     border-color: {PURPLE}; background: rgba(139,92,246,0.06); }}
-QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button, QDoubleSpinBox::down-button,
+QTimeEdit::up-button, QTimeEdit::down-button {{
     background: transparent; border: none; width: 18px; }}
 QComboBox::drop-down {{ border: none; width: 24px; }}
 QComboBox QAbstractItemView {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 10px; padding: 4px;
