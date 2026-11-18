@@ -28,7 +28,7 @@ from dogsapka_clipper import __version__
 
 log = logging.getLogger(__name__)
 
-REPO = "guralynoel/dogsapka-ai-clipper"
+REPO = "dogsapkaofc/dogsapka-ai-clipper"
 RELEASES_URL = f"https://api.github.com/repos/{REPO}/releases"
 DESKTOP_TAG = re.compile(r"^[vV]\d+(\.\d+)*$")
 RELEASES_PAGE = f"https://github.com/{REPO}/releases/latest"
